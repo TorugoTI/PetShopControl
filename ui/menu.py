@@ -150,3 +150,14 @@ class TelaMenuInicial(QWidget):
             return 
          
         QMessageBox.information(self, "Recuperação de Conta", f"Um link para redefinição segura de senha foi enviado para o e-mail: {email}")
+
+    def login_fisico_clicado(self):
+        """Apenas captura os dados da tela e avisa o controlador"""
+        email = self.txt_email.text().strip()
+        senha = self.txt_senha.text().strip()
+
+        if not email or not senha:
+            QMessageBox.warning(self, "Campos Vazios", "Por favor, preencha o e-mail e a senha.")
+            return
+        
+        self.sinal_autenticar.emit(email, senha)

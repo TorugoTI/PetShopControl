@@ -6,13 +6,15 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QPixmap
 from ui.components import COR_BEGE_FUNDO, COR_TEXTO_ESCURO
+from data.database import BancoDeDados
 
 CAMINHO_ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
 class TelaDashboard(QWidget):
-    def __init__(self, banco):
+    def __init__(self, banco, email_usuario):
         super().__init__()
         self.banco = banco
+        self.email_usuario = email_usuario
         self.botoes_menu = {}
         self.init_ui()
 
@@ -94,15 +96,19 @@ class TelaDashboard(QWidget):
 
         self.stacked_widget = QStackedWidget()
         layout_principal.addWidget(self.stacked_widget)
+        
+        self.stacked_widget.addWidget(self.criar_pagina_dashboard())              # Índice 0
+        self.stacked_widget.addWidget(self.criar_painel_cadastros_completo())     # Índice 1
+        self.stacked_widget.addWidget(self.criar_pagina_consultas_real())         # Índice 2
+        self.stacked_widget.addWidget(self.criar_pagina_financeiro_real())        # Índice 3
+        self.stacked_widget.addWidget(self.criar_pagina_estoque_real())           # Índice 4
+        self.stacked_widget.addWidget(self.criar_pagina_perfil_real())            # Índice 5
 
-        self.verificar_e_popular_estoque_inicial()
-
-        self.stacked_widget.addWidget(self.criar_pagina_dashboard())
-        self.stacked_widget.addWidget(self.criar_painel_cadastros_completo())
-        self.stacked_widget.addWidget(self.criar_pagina_consultas_real())
-        self.stacked_widget.addWidget(self.criar_pagina_financeiro_real())
-        self.stacked_widget.addWidget(self.criar_pagina_estoque_real())
-        self.stacked_widget.addWidget(self.criar_pagina_perfil_real())  
+        try:
+            if hasattr(self, 'verificar_e_popular_estoque_inicial'):
+                self.verificar_e_popular_estoque_inicial()
+        except Exception as e:
+            print(f"[AVISO ESTOQUE]: Falha não-crítica ao iniciar estoque: {str(e)}")
 
     def mudar_pagina(self, indice):
         """Altera a tela visível no painel central e gerencia o destaque visual do menu"""
@@ -577,21 +583,27 @@ class TelaDashboard(QWidget):
         return pagina
 
     def verificar_e_popular_estoque_inicial(self):
-        """Insere produtos padrão para teste se a tabela do Modo Demo estiver zerada"""
-        cursor = self.banco.conexao.cursor()
-        cursor.execute("SELECT COUNT(*) FROM produtos_estoque")
-        if cursor.fetchone()[0] == 0:
-            produtos = [
-                ("Shampoo Neutro 5L", 3, 2, 5, 0), # Qtd atual: 3, Minima: 2, Rende 5 banhos
-                ("Condicionador Brilho 5L", 2, 1, 5, 0),
-                ("Ração Premium Filhotes 10kg", 5, 2, 10, 0),
-                ("Coleira Antipulgas", 8, 3, 1, 0)
-            ]
-            cursor.executemany(
-                "INSERT INTO produtos_estoque (nome_produto, quantidade_atual, quantidade_minima, rendimento_por_atendimento, atendimentos_realizados) VALUES (?, ?, ?, ?, ?)",
-                produtos
-            )
-            self.banco.conexao.commit()
+        """Garante que a tabela de produtos tenha itens padrão sem estourar a memória"""
+        if not self.banco or not self.banco.conexao:
+            return
+            
+        try:
+            cursor = self.banco.conexao.cursor()
+            cursor.execute("SELECT COUNT(*) FROM produtos_estoque")
+            if cursor.fetchone()[0] == 0:
+                produtos = [
+                    ('Shampoo Neutro 5L', 3, 2, 20, 0),
+                    ('Condicionador Brilho 5L', 2, 1, 25, 0),
+                    ('Perfume Filhotes 500ml', 4, 2, 50, 0)
+                ]
+                cursor.executemany("""
+                    INSERT INTO produtos_estoque 
+                    (nome_produto, quantidade_atual, quantidade_minima, rendimento_por_atendimento, atendimentos_realizados)
+                    VALUES (?, ?, ?, ?, ?)
+                """, produtos)
+                self.banco.conexao.commit()
+        except Exception as e:
+            print(f"[ERRO SILENCIOSO ESTOQUE]: {str(e)}")
 
     def carregar_dados_estoque(self):
         """Busca os produtos e renderiza aplicando alertas visuais caso estejam abaixo do limite"""
@@ -885,10 +897,13 @@ class TelaDashboard(QWidget):
         lbl_user_tit.setFont(QFont("Arial", 11, QFont.Weight.Bold))
         lbl_user_tit.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
         
-        lbl_email = QLabel("<b>E-mail:</b> demo@petshop.com (Ambiente Isolado)")
-        lbl_cargo = QLabel("<b>Nível de Acesso:</b> Administrador / Desenvolvedor")
-        lbl_status = QLabel("<b>Sessão:</b> Temporária (Dados serão resetados ao fechar)")
-        lbl_status.setStyleSheet("color: #7AA2C2; font-weight: bold;")
+        status_banco = "Temporária (RAM)" if self.banco.modo_demonstracao else "Persistente (Física Local)"
+        cor_status = "#C27A7A" if self.banco.modo_demonstracao else "#8CA485"
+
+        lbl_email = QLabel(f"<b>E-mail:</b> {self.email_usuario}")
+        lbl_cargo = QLabel("<b>Nível de Acesso:</b> Administrador")
+        lbl_status = QLabel(f"<b>Sessão:</b> {status_banco}")
+        lbl_status.setStyleSheet(f"color: {cor_status}; font-weight: bold;")
 
         layout_card.addWidget(lbl_user_tit)
         layout_card.addWidget(lbl_email)
@@ -896,65 +911,15 @@ class TelaDashboard(QWidget):
         layout_card.addWidget(lbl_status)
         layout_principal.addWidget(card_usuario)
 
-        lbl_secao_acoes = QLabel("⚙️ Ferramentas de Gerenciamento")
-        lbl_secao_acoes.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        lbl_secao_acoes.setStyleSheet(f"color: {COR_TEXTO_ESCURO}; margin-top: 10px;")
-        layout_principal.addWidget(lbl_secao_acoes)
-
-        layout_botoes = QHBoxLayout()
-        layout_botoes.setSpacing(15)
-
-        btn_senha = QPushButton("🔑 Mudar Senha")
-        btn_senha.clicked.connect(self.simular_mudanca_senha)
-        self._estilizar_botao_perfil(btn_senha, "#8CA485")
-
-        btn_codigo = QPushButton("🎫 Gerar Código de Convite")
-        btn_codigo.clicked.connect(self.simular_geracao_codigo)
-        self._estilizar_botao_perfil(btn_codigo, "#7AA2C2")
-
-        btn_backup = QPushButton("💾 Fazer Backup da RAM")
-        btn_backup.clicked.connect(self.simular_backup_banco)
-        self._estilizar_botao_perfil(btn_backup, "#7AA2C2")
-
-        layout_botoes.addWidget(btn_senha)
-        layout_botoes.addWidget(btn_codigo)
-        layout_botoes.addWidget(btn_backup)
-        layout_principal.addLayout(layout_botoes)
-
-        layout_rodape = QHBoxLayout()
-        layout_rodape.setSpacing(15)
-
-        btn_update = QPushButton("🔄 Verificar Atualizações do App")
-        btn_update.clicked.connect(lambda: QMessageBox.information(self, "Atualização", "PetShop Control v1.0.0\n\nO aplicativo já está na versão mais recente disponível."))
-        self._estilizar_botao_perfil(btn_update, "#E6E1D6", texto_escuro=True)
-
-        btn_sair = QPushButton("🚪 Encerrar Sessão (Sair)")
-        btn_sair.clicked.connect(self.close)
-        self._estilizar_botao_perfil(btn_sair, "#C27A7A")
-
-        layout_rodape.addWidget(btn_update)
-        layout_rodape.addWidget(btn_sair)
-        
-        layout_principal.addStretch()
-        layout_principal.addLayout(layout_rodape)
-
-        card_usuario.setStyleSheet("""
-            QFrame { background-color: white; border: 1px solid #D1C7BD; border-radius: 6px; }
-            QLabel { color: #4A4540; border: none; }
-        """)
-
-        return pagina
-
-
     def simular_mudanca_senha(self):
-        """Simula a rotina de update de credenciais"""
+        """Atualiza as credenciais do usuário ativo no banco correto"""
         from PyQt6.QtWidgets import QInputDialog
         nova_senha, ok = QInputDialog.getText(self, "Segurança", "Digite a sua nova senha de acesso:", QLineEdit.EchoMode.Password)
         if ok and nova_senha.strip():
             cursor = self.banco.conexao.cursor()
-            cursor.execute("UPDATE usuarios SET senha = ? WHERE email = 'demo@petshop.com'", (nova_senha.strip(),))
+            cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha.strip(), self.email_usuario))
             self.banco.conexao.commit()
-            QMessageBox.information(self, "Sucesso", "Senha do usuário de testes atualizada com sucesso na RAM!")
+            QMessageBox.information(self, "Sucesso", "Senha atualizada com sucesso no banco de dados!")
 
     def simular_geracao_codigo(self):
         """Simula a geração de chaves de convite exclusivas para novos operadores"""
@@ -1003,3 +968,54 @@ class TelaDashboard(QWidget):
                 background-color: {cor_fundo}; /* Fallback visual */
             }}
         """)
+
+    def processar_autenticacao(self, email, senha):
+        """Cria o banco físico na hora e valida as credenciais ocultas do .env"""
+        try:
+            print(f"[SISTEMA] Tentando autenticar o usuário: {email}")
+            
+            self.banco = BancoDeDados(modo_demonstracao=False)
+            
+            if not self.banco.conexao:
+                self.banco.conectar()
+                
+            cursor = self.banco.conexao.cursor()
+            
+            cursor.execute(
+                "SELECT cargo FROM usuarios WHERE email = ? AND senha = ?", 
+                (email.strip(), senha.strip())
+            )
+            usuario = cursor.fetchone()
+            
+            if usuario:
+                print(f"[SISTEMA] Login aceito com sucesso para {email}!")
+                self.abrir_dashboard(email_logado=email.strip())
+            else:
+                print(f"[SISTEMA] Credenciais inválidas para o e-mail: {email}")
+                QMessageBox.warning(self.tela_login, "Acesso Negado", "E-mail ou senha incorretos.")
+                self.banco.fechar_conexao()
+                self.banco = None
+                
+        except Exception as e:
+            print(f"[ERRO CRÍTICO NO LOGIN]: {str(e)}")
+            QMessageBox.critical(self.tela_login, "Erro de Conexão", f"Falha ao autenticar: {str(e)}")
+
+    def ativar_modo_demonstracao(self):
+        """Ativa o sistema na prática usando o banco volátil em memória RAM"""
+        try:
+            print("[SISTEMA] Inicializando Modo Demonstração...")
+            self.banco = BancoDeDados(modo_demonstracao=True)
+            
+            self.abrir_dashboard(email_logado="demo@petshop.com")
+        except Exception as e:
+            QMessageBox.critical(None, "Erro Crítico", f"Erro ao iniciar demonstração: {str(e)}")
+
+    def abrir_dashboard(self, email_logado):
+        """Faz a transição de telas limpa injetando o e-mail de forma 100% dinâmica"""
+        try:
+            self.tela_dashboard = TelaDashboard(self.banco, email_logado)
+            self.tela_dashboard.show()
+            
+            self.tela_login.close()
+        except Exception as e:
+            QMessageBox.critical(None, "Erro de Inicialização", f"Falha ao abrir o painel principal: {str(e)}")
