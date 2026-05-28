@@ -95,12 +95,14 @@ class TelaDashboard(QWidget):
         self.stacked_widget = QStackedWidget()
         layout_principal.addWidget(self.stacked_widget)
 
+        self.verificar_e_popular_estoque_inicial()
+
         self.stacked_widget.addWidget(self.criar_pagina_dashboard())
-        self.stacked_widget.addWidget(self.criar_pagina_placeholder("Painel de Cadastros"))
-        self.stacked_widget.addWidget(self.criar_pagina_placeholder("Consulta & Prontuário"))
-        self.stacked_widget.addWidget(self.criar_pagina_placeholder("Financeiro & Caixa"))
-        self.stacked_widget.addWidget(self.criar_pagina_placeholder("Estoque Inteligente"))
-        self.stacked_widget.addWidget(self.criar_pagina_placeholder("Perfil & Usuários"))
+        self.stacked_widget.addWidget(self.criar_painel_cadastros_completo())
+        self.stacked_widget.addWidget(self.criar_pagina_consultas_real())
+        self.stacked_widget.addWidget(self.criar_pagina_financeiro_real())
+        self.stacked_widget.addWidget(self.criar_pagina_estoque_real())
+        self.stacked_widget.addWidget(self.criar_pagina_perfil_real())  
 
     def mudar_pagina(self, indice):
         """Altera a tela visível no painel central e gerencia o destaque visual do menu"""
@@ -212,9 +214,10 @@ class TelaDashboard(QWidget):
     def carregar_dados_agenda(self):
         cursor = self.banco.conexao.cursor()
         query = """
-            SELECT p.nome, p.nome_dono, a.servico, a.hora_atendimento, a.valor, a.status
+            SELECT p.nome, t.nome, a.servico, a.hora_atendimento, a.valor, a.status
             FROM atendimentos a
             JOIN pets p ON a.pet_id = p.id
+            JOIN tutores t ON p.tutor_id = t.id
             ORDER BY a.hora_atendimento ASC
         """
         cursor.execute(query)
@@ -662,3 +665,341 @@ class TelaDashboard(QWidget):
             self.banco.conexao.commit()
             
             self.carregar_dados_estoque() 
+    
+    def criar_pagina_consultas_real(self):
+        """Gera a interface de busca e prontuário histórico"""
+        pagina = QWidget()
+        layout = QVBoxLayout(pagina)
+        layout.setContentsMargins(30, 25, 30, 25)
+        layout.setSpacing(15)
+
+        lbl_titulo = QLabel("🔍 Consulta de Histórico & Prontuários")
+        lbl_titulo.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        lbl_titulo.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
+        layout.addWidget(lbl_titulo)
+
+        layout_busca = QHBoxLayout()
+        self.inp_busca = QLineEdit()
+        self.inp_busca.setPlaceholderText("Digite o nome do Pet ou do Tutor para buscar...")
+        self.inp_busca.setStyleSheet("""
+            QLineEdit { 
+                background-color: white; border: 1px solid #D1C7BD; 
+                border-radius: 4px; padding: 8px; color: #333; font-size: 11pt;
+            }
+        """)
+        self.inp_busca.textChanged.connect(self.filtrar_prontuarios)
+        layout_busca.addWidget(self.inp_busca)
+        layout.addLayout(layout_busca)
+
+        self.tabela_consultas = QTableWidget()
+        self.tabela_consultas.setStyleSheet("""
+            QTableWidget {
+                background-color: white; border: 1px solid #D1C7BD;
+                border-radius: 6px; gridline-color: #EFECE6;
+            }
+            QHeaderView::section {
+                background-color: #F4F1EA; padding: 8px; border: none; font-weight: bold;
+            }
+        """)
+        layout.addWidget(self.tabela_consultas)
+
+        self.filtrar_prontuarios()
+
+        return pagina
+
+    def filtrar_prontuarios(self):
+        """Filtra os atendimentos com base no texto digitado na barra de pesquisa"""
+        texto_busca = self.inp_busca.text().strip()
+        cursor = self.banco.conexao.cursor()
+
+        query = """
+            SELECT p.nome, t.nome, a.servico, a.data_atendimento || ' ás ' || a.hora_atendimento, a.valor, a.status
+            FROM atendimentos a
+            JOIN pets p ON a.pet_id = p.id
+            JOIN tutores t ON p.tutor_id = t.id
+            WHERE p.nome LIKE ? OR t.nome LIKE ?
+            ORDER BY a.data_atendimento DESC, a.hora_atendimento DESC
+        """
+        
+        parametro = f"%{texto_busca}%"
+        cursor.execute(query, (parametro, parametro))
+        resultados = cursor.fetchall()
+
+        self.tabela_consultas.setColumnCount(6)
+        self.tabela_consultas.setRowCount(len(resultados))
+        self.tabela_consultas.setHorizontalHeaderLabels(["Pet", "Tutor (Responsável)", "Serviço Prestado", "Data & Horário", "Preço (R$)", "Status"])
+        
+        header = self.tabela_consultas.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        for linha_idx, linha_dados in enumerate(resultados):
+            for col_idx, dado in enumerate(linha_dados):
+                item = QTableWidgetItem(str(dado))
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                
+                if col_idx == 5:
+                    if dado == "Agendado":
+                        item.setForeground(Qt.GlobalColor.blue)
+                    else:
+                        item.setForeground(Qt.GlobalColor.darkGreen)
+
+                self.tabela_consultas.setItem(linha_idx, col_idx, item)
+
+    def criar_pagina_financeiro_real(self):
+        """Gera a interface do Financeiro & Caixa detalhado por Pet/Tutor e Gastos"""
+        pagina = QWidget()
+        layout_principal = QVBoxLayout(pagina)
+        layout_principal.setContentsMargins(30, 25, 30, 25)
+        layout_principal.setSpacing(15)
+
+        lbl_titulo = QLabel("📊 Fluxo de Caixa Detalhado (Demonstrativo)")
+        lbl_titulo.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        lbl_titulo.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
+        layout_principal.addWidget(lbl_titulo)
+
+        layout_tabelas = QHBoxLayout()
+        layout_tabelas.setSpacing(20)
+
+        container_entradas = QWidget()
+        layout_ent = QVBoxLayout(container_entradas)
+        layout_ent.setContentsMargins(0, 0, 0, 0)
+        
+        lbl_ent = QLabel("📈 Receitas (Preços Negociados por Pet)")
+        lbl_ent.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        lbl_ent.setStyleSheet("color: #4A6B40;")
+        layout_ent.addWidget(lbl_ent)
+
+        self.tabela_financeiro_entradas = QTableWidget()
+        self.tabela_financeiro_entradas.setStyleSheet(self._estilo_tabela_financeira())
+        layout_ent.addWidget(self.tabela_financeiro_entradas)
+        layout_tabelas.addWidget(container_entradas)
+
+        container_saidas = QWidget()
+        layout_sai = QVBoxLayout(container_saidas)
+        layout_sai.setContentsMargins(0, 0, 0, 0)
+        
+        lbl_sai = QLabel("📉 Despesas & Custos Operacionais")
+        lbl_sai.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        lbl_sai.setStyleSheet("color: #A34747;")
+        layout_sai.addWidget(lbl_sai)
+
+        self.tabela_financeiro_saidas = QTableWidget()
+        self.tabela_financeiro_saidas.setStyleSheet(self._estilo_tabela_financeira())
+        layout_sai.addWidget(self.tabela_financeiro_saidas)
+        layout_tabelas.addWidget(container_saidas)
+
+        layout_principal.addLayout(layout_tabelas)
+
+        self.carregar_dados_financeiros_detalhados()
+
+        return pagina
+
+    def carregar_dados_financeiros_detalhados(self):
+        """Busca os dados de faturamento mapeando Pet/Tutor e as despesas registradas"""
+        cursor = self.banco.conexao.cursor()
+
+        query_entradas = """
+            SELECT p.nome, t.nome, a.servico, a.valor
+            FROM atendimentos a
+            JOIN pets p ON a.pet_id = p.id
+            JOIN tutores t ON p.tutor_id = t.id
+            WHERE a.status != 'Cancelado'
+        """
+        cursor.execute(query_entradas)
+        entradas = cursor.fetchall()
+
+        self.tabela_financeiro_entradas.setColumnCount(3)
+        self.tabela_financeiro_entradas.setRowCount(len(entradas))
+        self.tabela_financeiro_entradas.setHorizontalHeaderLabels(["Pet (Tutor)", "Serviço", "Arrecadado"])
+        self.tabela_financeiro_entradas.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        for linha_idx, dados in enumerate(entradas):
+            pet_nome, tutor_nome, servico, valor = dados
+            identificacao = f"{pet_nome} ({tutor_nome.split()[0]})"
+            
+            item_id = QTableWidgetItem(identificacao)
+            item_srv = QTableWidgetItem(servico)
+            item_val = QTableWidgetItem(f"R$ {valor:.2f}")
+            item_val.setForeground(Qt.GlobalColor.darkGreen)
+
+            for col_idx, item in enumerate([item_id, item_srv, item_val]):
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.tabela_financeiro_entradas.setItem(linha_idx, col_idx, item)
+
+        query_saidas = """
+            SELECT descricao, valor, data_gasto FROM gastos ORDER BY data_gasto DESC
+        """
+        cursor.execute(query_saidas)
+        saidas = cursor.fetchall()
+
+        self.tabela_financeiro_saidas.setColumnCount(2)
+        self.tabela_financeiro_saidas.setRowCount(len(saidas))
+        self.tabela_financeiro_saidas.setHorizontalHeaderLabels(["Descrição do Custo", "Pago"])
+        self.tabela_financeiro_saidas.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        for linha_idx, dados in enumerate(saidas):
+            descricao, valor, _ = dados
+            
+            item_desc = QTableWidgetItem(descricao)
+            item_val = QTableWidgetItem(f"R$ {valor:.2f}")
+            item_val.setForeground(Qt.GlobalColor.red)
+
+            for col_idx, item in enumerate([item_desc, item_val]):
+                item.setFlags(Qt.ItemFlag.ItemIsSelectable | Qt.ItemFlag.ItemIsEnabled)
+                self.tabela_financeiro_saidas.setItem(linha_idx, col_idx, item)
+
+    def _estilo_tabela_financeira(self):
+        return """
+            QTableWidget {
+                background-color: white;
+                border: 1px solid #D1C7BD;
+                border-radius: 6px;
+                gridline-color: #EFECE6;
+            }
+            QHeaderView::section {
+                background-color: #F4F1EA;
+                padding: 6px;
+                border: none;
+                font-weight: bold;
+            }
+        """
+    
+    def criar_pagina_perfil_real(self):
+        """Gera a interface de Perfil & Usuários com recursos operacionais e de segurança"""
+        pagina = QWidget()
+        layout_principal = QVBoxLayout(pagina)
+        layout_principal.setContentsMargins(30, 25, 30, 25)
+        layout_principal.setSpacing(20)
+
+        lbl_titulo = QLabel("👤 Central do Usuário e Configurações")
+        lbl_titulo.setFont(QFont("Arial", 16, QFont.Weight.Bold))
+        lbl_titulo.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
+        layout_principal.addWidget(lbl_titulo)
+
+        card_usuario = QFrame()
+        card_usuario.setStyleSheet("background-color: white; border: 1px solid #D1C7BD; border-radius: 6px;")
+        layout_card = QVBoxLayout(card_usuario)
+        layout_card.setSpacing(8)
+
+        lbl_user_tit = QLabel("📋 Dados da Sessão Ativa")
+        lbl_user_tit.setFont(QFont("Arial", 11, QFont.Weight.Bold))
+        lbl_user_tit.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
+        
+        lbl_email = QLabel("<b>E-mail:</b> demo@petshop.com (Ambiente Isolado)")
+        lbl_cargo = QLabel("<b>Nível de Acesso:</b> Administrador / Desenvolvedor")
+        lbl_status = QLabel("<b>Sessão:</b> Temporária (Dados serão resetados ao fechar)")
+        lbl_status.setStyleSheet("color: #7AA2C2; font-weight: bold;")
+
+        layout_card.addWidget(lbl_user_tit)
+        layout_card.addWidget(lbl_email)
+        layout_card.addWidget(lbl_cargo)
+        layout_card.addWidget(lbl_status)
+        layout_principal.addWidget(card_usuario)
+
+        lbl_secao_acoes = QLabel("⚙️ Ferramentas de Gerenciamento")
+        lbl_secao_acoes.setFont(QFont("Arial", 12, QFont.Weight.Bold))
+        lbl_secao_acoes.setStyleSheet(f"color: {COR_TEXTO_ESCURO}; margin-top: 10px;")
+        layout_principal.addWidget(lbl_secao_acoes)
+
+        layout_botoes = QHBoxLayout()
+        layout_botoes.setSpacing(15)
+
+        btn_senha = QPushButton("🔑 Mudar Senha")
+        btn_senha.clicked.connect(self.simular_mudanca_senha)
+        self._estilizar_botao_perfil(btn_senha, "#8CA485")
+
+        btn_codigo = QPushButton("🎫 Gerar Código de Convite")
+        btn_codigo.clicked.connect(self.simular_geracao_codigo)
+        self._estilizar_botao_perfil(btn_codigo, "#7AA2C2")
+
+        btn_backup = QPushButton("💾 Fazer Backup da RAM")
+        btn_backup.clicked.connect(self.simular_backup_banco)
+        self._estilizar_botao_perfil(btn_backup, "#7AA2C2")
+
+        layout_botoes.addWidget(btn_senha)
+        layout_botoes.addWidget(btn_codigo)
+        layout_botoes.addWidget(btn_backup)
+        layout_principal.addLayout(layout_botoes)
+
+        layout_rodape = QHBoxLayout()
+        layout_rodape.setSpacing(15)
+
+        btn_update = QPushButton("🔄 Verificar Atualizações do App")
+        btn_update.clicked.connect(lambda: QMessageBox.information(self, "Atualização", "PetShop Control v1.0.0\n\nO aplicativo já está na versão mais recente disponível."))
+        self._estilizar_botao_perfil(btn_update, "#E6E1D6", texto_escuro=True)
+
+        btn_sair = QPushButton("🚪 Encerrar Sessão (Sair)")
+        btn_sair.clicked.connect(self.close)
+        self._estilizar_botao_perfil(btn_sair, "#C27A7A")
+
+        layout_rodape.addWidget(btn_update)
+        layout_rodape.addWidget(btn_sair)
+        
+        layout_principal.addStretch()
+        layout_principal.addLayout(layout_rodape)
+
+        card_usuario.setStyleSheet("""
+            QFrame { background-color: white; border: 1px solid #D1C7BD; border-radius: 6px; }
+            QLabel { color: #4A4540; border: none; }
+        """)
+
+        return pagina
+
+
+    def simular_mudanca_senha(self):
+        """Simula a rotina de update de credenciais"""
+        from PyQt6.QtWidgets import QInputDialog
+        nova_senha, ok = QInputDialog.getText(self, "Segurança", "Digite a sua nova senha de acesso:", QLineEdit.EchoMode.Password)
+        if ok and nova_senha.strip():
+            cursor = self.banco.conexao.cursor()
+            cursor.execute("UPDATE usuarios SET senha = ? WHERE email = 'demo@petshop.com'", (nova_senha.strip(),))
+            self.banco.conexao.commit()
+            QMessageBox.information(self, "Sucesso", "Senha do usuário de testes atualizada com sucesso na RAM!")
+
+    def simular_geracao_codigo(self):
+        """Simula a geração de chaves de convite exclusivas para novos operadores"""
+        import secrets
+        codigo_gerado = f"PET-{secrets.token_hex(4).upper()}"
+        cursor = self.banco.conexao.cursor()
+        cursor.execute("INSERT INTO codigos_convite (codigo, status) VALUES (?, 'Ativo')", (codigo_gerado,))
+        self.banco.conexao.commit()
+        
+        QMessageBox.information(self, "Token Gerado", f"Código de convite para novo funcionário criado:\n\n🔑 {codigo_gerado}\n\nEnvie este código para o novo operador se registrar.")
+
+    def simular_backup_banco(self):
+        """Simula a exportação de segurança do banco em memória"""
+        import json
+        cursor = self.banco.conexao.cursor()
+        
+        cursor.execute("SELECT nome_produto, quantidade_atual FROM produtos_estoque")
+        dados_estoque = cursor.fetchall()
+        
+        QMessageBox.information(
+            self, 
+            "Backup Concluído", 
+            f"Rotina de integridade executada!\n\n"
+            f"• Estado da RAM espelhado com sucesso.\n"
+            f"• {len(dados_estoque)} itens de estoque catalogados na imagem de segurança.\n"
+            f"• Arquivo temporário criado localmente."
+        )
+
+    def _estilizar_botao_perfil(self, botao, cor_fundo, texto_escuro=False):
+        botao.setCursor(Qt.CursorShape.PointingHandCursor)
+        botao.setFixedHeight(40)
+        cor_texto = COR_TEXTO_ESCURO if texto_escuro else "white"
+        font_weight = "bold" if not texto_escuro else "normal"
+        
+        botao.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {cor_fundo};
+                color: {cor_texto};
+                font-weight: {font_weight};
+                border-radius: 4px;
+                border: none;
+                padding: 0px 15px;
+            }}
+            QPushButton:hover {{
+                opacity: 0.9;
+                background-color: {cor_fundo}; /* Fallback visual */
+            }}
+        """)

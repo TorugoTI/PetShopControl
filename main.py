@@ -18,7 +18,14 @@ class ControladorSistema:
         self.tela_login.sinal_autenticar.connect(self.processar_autenticacao)
         
         self.tela_login.show()
-        sys.exit(self.app.exec())
+        
+        codigo_saida = self.app.exec()
+        
+        if self.banco:
+            print("[SISTEMA] Encerrando conexões e limpando a memória RAM...")
+            self.banco.fechar_conexao()
+            
+        sys.exit(codigo_saida)
 
     def ativar_modo_demonstracao(self):
         """Ativa o sistema na prática usando o banco volátil em memória RAM"""
