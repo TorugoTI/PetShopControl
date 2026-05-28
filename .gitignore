@@ -1,0 +1,19 @@
+# Cache do Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# Ambientes virtuais
+venv/
+.venv/
+env/
+
+# Banco de dados local (Produção)
+*.db
+*.sqlite3
+
+# Arquivos do sistema operacional
+.DS_Store
+Thumbs.db
