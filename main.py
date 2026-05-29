@@ -1,7 +1,26 @@
 import sys
+import os
 import faulthandler
+import pyrebase
+from dotenv import load_dotenv
 
 faulthandler.enable()
+load_dotenv()
+
+config_firebase = {
+    "apiKey": os.getenv("FIREBASE_API_KEY"),
+    "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN"),
+    "databaseURL": os.getenv("FIREBASE_DATABASE_URL"),
+    "projectId": os.getenv("FIREBASE_PROJECT_ID"),
+    "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET"),
+    "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID"),
+    "appId": os.getenv("FIREBASE_APP_ID")
+}
+
+chave_gemini = os.getenv("GEMINI_API_KEY")
+agenda_id = os.getenv("GOOGLE_CALENDAR_ID")
+firebase = pyrebase.initialize_app(config_firebase)
+auth_firebase = firebase.auth()
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from data.database import BancoDeDados
@@ -42,31 +61,37 @@ class ControladorSistema:
             QMessageBox.critical(None, "Erro Crítico", f"Erro ao iniciar demonstração: {str(e)}")
 
     def processar_autenticacao(self, email, senha):
-        """Inicializa o banco de dados físico apenas após o clique de autenticação"""
+        """Valida as credenciais em tempo real nos servidores do Firebase Auth"""
         try:
-            print(f"[SISTEMA] Tentando autenticar o usuário: {email}")
+            print(f"[FIREBASE] Tentando autenticar: {email}")
+            
+            usuario_firebase = auth_firebase.sign_in_with_email_and_password(email.strip(), senha.strip())
+            
+            token_sessao = usuario_firebase['idToken']
+            print(f"[SISTEMA] Autenticação Firebase bem-sucedida para o usuário!")
+            
+            self.banco = BancoDeDados(modo_demonstracao=False)
+            
+            self.abrir_dashboard(email_logado=email.strip())
+            
+        except Exception as erro_firebase:
+            print(f"[ERRO AUTENTICAÇÃO]: {str(erro_firebase)}")
+            
+            mensagem_erro = "E-mail ou senha incorretos."
+            erro_str = str(erro_firebase)
+            
+            if "EMAIL_NOT_FOUND" in erro_str:
+                mensagem_erro = "Este e-mail de usuário não está cadastrado no sistema."
+            elif "INVALID_PASSWORD" in erro_str:
+                mensagem_erro = "Senha incorreta. Verifique os dados e tente novamente."
+            elif "USER_DISABLED" in erro_str:
+                mensagem_erro = "Esta conta administrativa foi desativada pelo desenvolvedor."
+            
+            QMessageBox.warning(self.tela_login, "Acesso Negado", mensagem_erro)
+            
             if self.banco:
                 self.banco.fechar_conexao()
-
-            self.banco = BancoDeDados(modo_demonstracao=False)
-            cursor = self.banco.conexao.cursor()
-            
-            cursor.execute(
-                "SELECT cargo FROM usuarios WHERE email = ? AND senha = ?", 
-                (email.strip(), senha.strip())
-            )
-            usuario = cursor.fetchone()
-            
-            if usuario:
-                print(f"[SISTEMA] Autenticado com sucesso!")
-                self.abrir_dashboard(email_logado=email.strip())
-            else:
-                QMessageBox.warning(self.tela_login, "Acesso Negado", "E-mail ou senha incorretos.")
-                self.banco.fechar_conexao()
                 self.banco = None
-                
-        except Exception as e:
-            QMessageBox.critical(self.tela_login, "Erro de Conexão", f"Falha ao autenticar: {str(e)}")
 
     def abrir_dashboard(self, email_logado):
         """Realiza a transição de janelas injetando o e-mail de forma dinâmica"""
