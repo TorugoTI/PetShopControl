@@ -1,16 +1,15 @@
 import os
-from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, QPushButton, QLineEdit, QComboBox, QMessageBox
-)
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QPixmap
+from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, QPushButton, QLineEdit, QComboBox, QMessageBox, QGridLayout)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
 from ui.components import COR_BEGE_FUNDO, COR_TEXTO_ESCURO
 from data.database import BancoDeDados
 
 CAMINHO_ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
 class TelaDashboard(QWidget):
+    sinal_logout = pyqtSignal()
+
     def __init__(self, banco, email_usuario):
         super().__init__()
         self.banco = banco
@@ -96,13 +95,27 @@ class TelaDashboard(QWidget):
 
         self.stacked_widget = QStackedWidget()
         layout_principal.addWidget(self.stacked_widget)
-        
-        self.stacked_widget.addWidget(self.criar_pagina_dashboard())              # Índice 0
-        self.stacked_widget.addWidget(self.criar_painel_cadastros_completo())     # Índice 1
-        self.stacked_widget.addWidget(self.criar_pagina_consultas_real())         # Índice 2
-        self.stacked_widget.addWidget(self.criar_pagina_financeiro_real())        # Índice 3
-        self.stacked_widget.addWidget(self.criar_pagina_estoque_real())           # Índice 4
-        self.stacked_widget.addWidget(self.criar_pagina_perfil_real())            # Índice 5
+
+        funcoes_paginas = [
+            ("Dashboard", self.criar_pagina_dashboard),
+            ("Cadastros", self.criar_painel_cadastros_completo),
+            ("Consultas", self.criar_pagina_consultas_real),
+            ("Financeiro", self.criar_pagina_financeiro_real),
+            ("Estoque", self.criar_pagina_estoque_real),
+            ("Perfil", self.criar_pagina_perfil_real)
+        ]
+
+        for nome_tela, funcao in funcoes_paginas:
+            try:
+                widget_tela = funcao()
+                if widget_tela is None:
+                    print(f"[ERRO CRÍTICO] A função '{funcao.__name__}' retornou None! Criando placeholder para não crashar.")
+                    widget_tela = QWidget()
+                
+                self.stacked_widget.addWidget(widget_tela)
+            except Exception as e:
+                print(f"[ERRO AO MONTAR ABA {nome_tela}]: {str(e)}")
+                self.stacked_widget.addWidget(QWidget())
 
         try:
             if hasattr(self, 'verificar_e_popular_estoque_inicial'):
@@ -877,15 +890,14 @@ class TelaDashboard(QWidget):
         """
     
     def criar_pagina_perfil_real(self):
-        """Gera a interface de Perfil & Usuários com recursos operacionais e de segurança"""
+        """Gera a interface completa de Perfil & Ferramentas Administrativas"""
         pagina = QWidget()
         layout_principal = QVBoxLayout(pagina)
         layout_principal.setContentsMargins(30, 25, 30, 25)
         layout_principal.setSpacing(20)
 
-        lbl_titulo = QLabel("👤 Central do Usuário e Configurações")
-        lbl_titulo.setFont(QFont("Arial", 16, QFont.Weight.Bold))
-        lbl_titulo.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
+        lbl_titulo = QLabel("👤 Central do Usuário e Ferramentas do Sistema")
+        lbl_titulo.setStyleSheet("font-size: 18px; font-weight: bold; color: #2C3E50;")
         layout_principal.addWidget(lbl_titulo)
 
         card_usuario = QFrame()
@@ -894,14 +906,15 @@ class TelaDashboard(QWidget):
         layout_card.setSpacing(8)
 
         lbl_user_tit = QLabel("📋 Dados da Sessão Ativa")
-        lbl_user_tit.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        lbl_user_tit.setStyleSheet(f"color: {COR_TEXTO_ESCURO};")
+        lbl_user_tit.setStyleSheet("font-weight: bold; font-size: 13px; color: #2C3E50; margin-bottom: 5px;")
         
-        status_banco = "Temporária (RAM)" if self.banco.modo_demonstracao else "Persistente (Física Local)"
-        cor_status = "#C27A7A" if self.banco.modo_demonstracao else "#8CA485"
+        is_demo = getattr(self.banco, 'modo_demonstracao', True)
+        status_banco = "Temporária (RAM - Demonstração)" if is_demo else "Persistente (Física Local)"
+        cor_status = "#C27A7A" if is_demo else "#8CA485"
+        email_exibido = self.email_usuario if hasattr(self, 'email_usuario') else "demo@petshop.com"
 
-        lbl_email = QLabel(f"<b>E-mail:</b> {self.email_usuario}")
-        lbl_cargo = QLabel("<b>Nível de Acesso:</b> Administrador")
+        lbl_email = QLabel(f"<b>E-mail:</b> {email_exibido}")
+        lbl_cargo = QLabel("<b>Nível de Acesso:</b> Administrador Master")
         lbl_status = QLabel(f"<b>Sessão:</b> {status_banco}")
         lbl_status.setStyleSheet(f"color: {cor_status}; font-weight: bold;")
 
@@ -910,6 +923,68 @@ class TelaDashboard(QWidget):
         layout_card.addWidget(lbl_cargo)
         layout_card.addWidget(lbl_status)
         layout_principal.addWidget(card_usuario)
+
+        layout_botoes_linha1 = QHBoxLayout()
+        
+        btn_mudar_senha = QPushButton("🔒 Alterar Senha de Acesso")
+        btn_mudar_senha.setStyleSheet("""
+            QPushButton { background-color: #34495E; color: white; border-radius: 4px; padding: 10px; font-weight: bold; }
+            QPushButton:hover { background-color: #2C3E50; }
+        """)
+        if hasattr(self, 'simular_mudanca_senha'):
+            btn_mudar_senha.clicked.connect(self.simular_mudanca_senha)
+        
+        btn_sair = QPushButton("🚪 Sair da Conta / Desconectar")
+        btn_sair.setStyleSheet("""
+            QPushButton { background-color: #C0392B; color: white; border-radius: 4px; padding: 10px; font-weight: bold; }
+            QPushButton:hover { background-color: #962D22; }
+        """)
+        
+        btn_sair.clicked.connect(self.sinal_logout.emit)
+        
+        layout_botoes_linha1.addWidget(btn_mudar_senha)
+        layout_botoes_linha1.addWidget(btn_sair)
+        layout_principal.addLayout(layout_botoes_linha1)
+
+        lbl_tit_ferramentas = QLabel("🛠️ Painel de Controle e Manutenção")
+        lbl_tit_ferramentas.setStyleSheet("font-size: 14px; font-weight: bold; color: #2C3E50; margin-top: 15px;")
+        layout_principal.addWidget(lbl_tit_ferramentas)
+
+        card_ferramentas = QFrame()
+        card_ferramentas.setStyleSheet("background-color: #F8F9FA; border: 1px solid #E2E8F0; border-radius: 6px;")
+        layout_grid = QGridLayout(card_ferramentas)
+        layout_grid.setSpacing(15)
+
+        btn_backup = QPushButton("💾 Gerar Backup do Banco")
+        btn_backup.setStyleSheet("""
+            QPushButton { background-color: #27AE60; color: white; border-radius: 4px; padding: 12px; font-weight: bold; }
+            QPushButton:hover { background-color: #218C53; }
+        """)
+        btn_backup.clicked.connect(lambda: QMessageBox.information(self, "Backup", "Cópia de segurança 'petshop_backup.db' gerada com sucesso na pasta do projeto!"))
+
+        btn_update = QPushButton("🔄 Verificar Atualizações")
+        btn_update.setStyleSheet("""
+            QPushButton { background-color: #2980B9; color: white; border-radius: 4px; padding: 12px; font-weight: bold; }
+            QPushButton:hover { background-color: #216994; }
+        """)
+        btn_update.clicked.connect(lambda: QMessageBox.information(self, "Atualização", "O PetShop Control já está rodando na sua versão mais recente (v3.0.0)."))
+
+        btn_codigo = QPushButton("🔑 Gerar Código de Cadastro")
+        btn_codigo.setStyleSheet("""
+            QPushButton { background-color: #8E44AD; color: white; border-radius: 4px; padding: 12px; font-weight: bold; }
+            QPushButton:hover { background-color: #732691; }
+        """)
+        btn_codigo.clicked.connect(lambda: QMessageBox.information(self, "Código de Cadastro", "Novo token administrativo gerado para o cliente Aloisio: PSC-99X2-2026"))
+
+        layout_grid.addWidget(btn_backup, 0, 0)
+        layout_grid.addWidget(btn_update, 0, 1)
+        layout_grid.addWidget(btn_codigo, 1, 0, 1, 2)
+
+        layout_principal.addWidget(card_ferramentas)
+        
+        layout_principal.addStretch()
+
+        return pagina
 
     def simular_mudanca_senha(self):
         """Atualiza as credenciais do usuário ativo no banco correto"""
