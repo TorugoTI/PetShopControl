@@ -1,10 +1,8 @@
 import sys
 import os
-import faulthandler
 import pyrebase
 from dotenv import load_dotenv
 
-faulthandler.enable()
 load_dotenv()
 
 config_firebase = {
@@ -30,6 +28,7 @@ from ui.dashboard import TelaDashboard
 class ControladorSistema:
     def __init__(self):
         self.app = QApplication(sys.argv)
+        self.versao_atual = "v1.0.0"
         self.banco = None
         self.tela_login = None
         self.tela_dashboard = None
@@ -68,11 +67,20 @@ class ControladorSistema:
             usuario_firebase = auth_firebase.sign_in_with_email_and_password(email.strip(), senha.strip())
             
             token_sessao = usuario_firebase['idToken']
-            print(f"[SISTEMA] Autenticação Firebase bem-sucedida para o usuário!")
+            email_limpo = email.strip()
+            
+            email_admin_configurado = os.getenv("ADMIN_EMAIL", "").strip()
+            
+            if email_limpo == email_admin_configurado:
+                cargo_usuario = "Administrador Master"
+            else:
+                cargo_usuario = "Funcionário / Operador"
+                
+            print(f"[SISTEMA] Usuário autenticado. Nível: {cargo_usuario}")
             
             self.banco = BancoDeDados(modo_demonstracao=False)
             
-            self.abrir_dashboard(email_logado=email.strip())
+            self.abrir_dashboard(email_logado=email_limpo, cargo=cargo_usuario)
             
         except Exception as erro_firebase:
             print(f"[ERRO AUTENTICAÇÃO]: {str(erro_firebase)}")
@@ -93,13 +101,10 @@ class ControladorSistema:
                 self.banco.fechar_conexao()
                 self.banco = None
 
-    def abrir_dashboard(self, email_logado):
-        """Realiza a transição de janelas injetando o e-mail de forma dinâmica"""
+    def abrir_dashboard(self, email_logado, cargo):
         try:
-            self.tela_dashboard = TelaDashboard(self.banco, email_logado)
-            
+            self.tela_dashboard = TelaDashboard(self.banco, email_logado, cargo, self.versao_atual)
             self.tela_dashboard.sinal_logout.connect(self.realizar_logout)
-            
             self.tela_dashboard.show()
             self.tela_login.close()
         except Exception as e:

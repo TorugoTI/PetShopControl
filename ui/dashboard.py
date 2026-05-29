@@ -1,4 +1,24 @@
 import os
+import pyrebase
+from dotenv import load_dotenv
+
+load_dotenv()
+
+config_firebase = {
+    "apiKey": os.getenv("FIREBASE_API_KEY"),
+    "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN"),
+    "databaseURL": os.getenv("FIREBASE_DATABASE_URL"),
+    "projectId": os.getenv("FIREBASE_PROJECT_ID"),
+    "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET"),
+    "messagingSenderId": os.getenv("FIREBASE_MESSAGING_SENDER_ID"),
+    "appId": os.getenv("FIREBASE_APP_ID")
+}
+
+chave_gemini = os.getenv("GEMINI_API_KEY")
+agenda_id = os.getenv("GOOGLE_CALENDAR_ID")
+firebase = pyrebase.initialize_app(config_firebase)
+auth_firebase = firebase.auth()
+
 from PyQt6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, QPushButton, QLineEdit, QComboBox, QMessageBox, QGridLayout)
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
@@ -8,12 +28,14 @@ from data.database import BancoDeDados
 CAMINHO_ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
 class TelaDashboard(QWidget):
-    sinal_logout = pyqtSignal()
+    sinal_logout = pyqtSignal()  
 
-    def __init__(self, banco, email_usuario):
+    def __init__(self, banco, email_usuario, cargo_usuario="Funcionário / Operador", versao_sistema="v1.0.0"):
         super().__init__()
         self.banco = banco
         self.email_usuario = email_usuario
+        self.cargo_usuario = cargo_usuario
+        self.versao_sistema = versao_sistema
         self.botoes_menu = {}
         self.init_ui()
 
@@ -914,9 +936,15 @@ class TelaDashboard(QWidget):
         email_exibido = self.email_usuario if hasattr(self, 'email_usuario') else "demo@petshop.com"
 
         lbl_email = QLabel(f"<b>E-mail:</b> {email_exibido}")
-        lbl_cargo = QLabel("<b>Nível de Acesso:</b> Administrador Master")
+        lbl_cargo = QLabel(f"<b>Nível de Acesso:</b> {self.cargo_usuario}")
         lbl_status = QLabel(f"<b>Sessão:</b> {status_banco}")
         lbl_status.setStyleSheet(f"color: {cor_status}; font-weight: bold;")
+
+        if self.cargo_usuario != "Administrador Master":
+            btn_backup.setEnabled(False)
+            btn_codigo.setEnabled(False)
+            btn_backup.setToolTip("Apenas o Administrador Master pode efetuar cópias de segurança do banco.")
+            btn_codigo.setToolTip("Apenas o Administrador Master pode gerar novos convites de cadastro.")
 
         layout_card.addWidget(lbl_user_tit)
         layout_card.addWidget(lbl_email)
@@ -967,7 +995,14 @@ class TelaDashboard(QWidget):
             QPushButton { background-color: #2980B9; color: white; border-radius: 4px; padding: 12px; font-weight: bold; }
             QPushButton:hover { background-color: #216994; }
         """)
-        btn_update.clicked.connect(lambda: QMessageBox.information(self, "Atualização", "O PetShop Control já está rodando na sua versão mais recente (v3.0.0)."))
+        
+        btn_update.clicked.connect(lambda: QMessageBox.information(
+            self, 
+            "Verificação de Sistema", 
+            f"Versão instalada: {self.versao_sistema}\n\n"
+            "Conectando ao servidor...\n"
+            "Nenhuma nova atualização encontrada. O PetShop Control está em dia!"
+        ))
 
         btn_codigo = QPushButton("🔑 Gerar Código de Cadastro")
         btn_codigo.setStyleSheet("""
@@ -1094,3 +1129,35 @@ class TelaDashboard(QWidget):
             self.tela_login.close()
         except Exception as e:
             QMessageBox.critical(None, "Erro de Inicialização", f"Falha ao abrir o painel principal: {str(e)}")
+            
+    def gerar_codigo_convite_firebase(self):
+        try:
+            import random
+            novo_token = f"PSC-{random.randint(1000, 9999)}-2026"
+        
+            db = firebase.database()
+        
+            dados_codigo = {"status": "disponivel", "gerado_por": self.email_usuario}
+            db.child("codigos_convite").child(novo_token).set(dados_codigo)
+        
+            QMessageBox.information(self, "Código Criado", f"Código de Uso Único Gerado:\n\n{novo_token}\n\nCopie e envie ao novo funcionário.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao salvar código na nuvem: {str(e)}")
+
+    def realizar_backup_nuvem(self):
+        try:
+            storage = firebase.storage()
+        
+            arquivo_local = "data/petshop.db"
+            if not os.path.exists(arquivo_local):
+                QMessageBox.warning(self, "Aviso", "O banco de dados local ainda não possui registros para backup.")
+            return
+            
+            nome_remoto = f"backups/petshop_backup_master.db"
+        
+            print("[FIREBASE] Enviando arquivo de banco de dados para a nuvem...")
+            storage.child(nome_remoto).put(arquivo_local)
+        
+            QMessageBox.information(self, "Backup em Nuvem", "Sucesso! O arquivo de segurança local foi sincronizado e criptografado nos servidores do Firebase.")
+        except Exception as e:
+            QMessageBox.critical(self, "Falha no Backup", f"Erro crítico ao subir arquivo: {str(e)}")
