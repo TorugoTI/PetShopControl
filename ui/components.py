@@ -93,3 +93,39 @@ class SeletorData(QDateEdit):
                 border-left: 1px solid {COR_INPUT_BORDAS};
             }}
         """)
+
+from PyQt6.QtWidgets import QLineEdit
+
+class CampoMoedaBancario(QLineEdit):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAlignment(Qt.AlignmentFlag.AlignLeft) 
+        self.setText("R$ 0,00")
+        self.textChanged.connect(self.formatar_moeda)
+        self._bloquear_sinal = False
+
+    def formatar_moeda(self, texto):
+        if self._bloquear_sinal:
+            return
+
+        numeros = "".join([c for c in texto if c.isdigit()])
+        
+        valor_int = int(numeros) if numeros else 0
+        
+        valor_final = valor_int / 100.0
+        
+        texto_formatado = f"R$ {valor_final:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+
+        self._bloquear_sinal = True
+        self.setText(texto_formatado)
+        self._bloquear_sinal = False
+
+    def pegar_valor_float(self):
+        """Retorna o valor puro em float pronto para salvar no SQLite (Ex: 100.50)"""
+        numeros = "".join([c for c in self.text() if c.isdigit()])
+        return int(numeros) / 100.0 if numeros else 0.0
+
+    def clear(self):
+        self._bloquear_sinal = True
+        self.setText("R$ 0,00")
+        self._bloquear_sinal = False

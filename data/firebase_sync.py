@@ -41,12 +41,14 @@ class SincronizadorFirebase:
             print("[FIREBASE] Modo Demo: Simulação de envio de backup para a nuvem finalizada.")
             return True
 
-        nome_banco_local = "petshop_local.db"
+        diretorio_raiz = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
+        caminho_banco_local = os.path.join(diretorio_raiz, "petshop.db")
+        
         data_hoje = datetime.now().strftime("%Y%m%d_%H%M%S")
         nome_arquivo_backup = f"backup_{conta_id}_{data_hoje}.db"
 
-        if not os.path.exists(nome_banco_local):
-            print("[ERRO] Banco de dados local não encontrado para backup!")
+        if not os.path.exists(caminho_banco_local):
+            print(f"[ERRO] Banco de dados local não encontrado em: {caminho_banco_local}")
             return False
 
         print(f"[FIREBASE] Iniciando rotina de checagem de backups para: {conta_id}")

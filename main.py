@@ -2,6 +2,7 @@ import sys
 import os
 import pyrebase
 from dotenv import load_dotenv
+from PyQt6.QtCore import QSettings
 
 load_dotenv()
 
@@ -48,67 +49,47 @@ class ControladorSistema:
         sys.exit(codigo_saida)
 
     def ativar_modo_demonstracao(self):
-        """Inicializa o sistema operando em memória RAM (Banco Volátil)"""
-        try:
-            print("[SISTEMA] Inicializando Modo Demonstração...")
-            if self.banco:
-                self.banco.fechar_conexao()
-                
-            self.banco = BancoDeDados(modo_demonstracao=True)
-            self.abrir_dashboard(email_logado="demo@petshop.com")
-        except Exception as e:
-            QMessageBox.critical(None, "Erro Crítico", f"Erro ao iniciar demonstração: {str(e)}")
+        print("[SISTEMA] Inicializando Modo Demonstração...")
+        if self.banco:
+            self.banco.fechar_conexao()
+            
+        self.banco = BancoDeDados(modo_demonstracao=True)
+        self.abrir_dashboard("demo@petshop.com", "Visitante (Modo Demo)")
+
+    def abrir_dashboard(self, email_logado, cargo):
+        print(f"Abrindo dashboard para {email_logado} com cargo {cargo}")
+        
+        self.tela_dashboard = TelaDashboard(self.banco, email_logado, cargo, self.versao_atual)
+        
+        self.tela_dashboard.sinal_logout.connect(self.realizar_logout)
+        
+        self.tela_dashboard.show()
+        
+        if self.tela_login:
+            self.tela_login.close()
 
     def processar_autenticacao(self, email, senha):
-        """Valida as credenciais em tempo real nos servidores do Firebase Auth"""
+        """Valida as credenciais e define o nível de acesso do usuário"""
         try:
             print(f"[FIREBASE] Tentando autenticar: {email}")
-            
             usuario_firebase = auth_firebase.sign_in_with_email_and_password(email.strip(), senha.strip())
             
-            token_sessao = usuario_firebase['idToken']
             email_limpo = email.strip()
+            admin_email = os.getenv("ADMIN_EMAIL", "").strip()
+            cargo_usuario = "Administrador Master" if email_limpo == admin_email else "Funcionário / Operador"
             
-            email_admin_configurado = os.getenv("ADMIN_EMAIL", "").strip()
-            
-            if email_limpo == email_admin_configurado:
-                cargo_usuario = "Administrador Master"
-            else:
-                cargo_usuario = "Funcionário / Operador"
-                
-            print(f"[SISTEMA] Usuário autenticado. Nível: {cargo_usuario}")
+            print(f"[SISTEMA] Usuário {email_limpo} autenticado como: {cargo_usuario}")
+
+            settings = QSettings("PetShopControl", "Login")
+            settings.setValue("ultimo_email", email_limpo)
             
             self.banco = BancoDeDados(modo_demonstracao=False)
-            
+
             self.abrir_dashboard(email_logado=email_limpo, cargo=cargo_usuario)
             
         except Exception as erro_firebase:
             print(f"[ERRO AUTENTICAÇÃO]: {str(erro_firebase)}")
-            
-            mensagem_erro = "E-mail ou senha incorretos."
-            erro_str = str(erro_firebase)
-            
-            if "EMAIL_NOT_FOUND" in erro_str:
-                mensagem_erro = "Este e-mail de usuário não está cadastrado no sistema."
-            elif "INVALID_PASSWORD" in erro_str:
-                mensagem_erro = "Senha incorreta. Verifique os dados e tente novamente."
-            elif "USER_DISABLED" in erro_str:
-                mensagem_erro = "Esta conta administrativa foi desativada pelo desenvolvedor."
-            
-            QMessageBox.warning(self.tela_login, "Acesso Negado", mensagem_erro)
-            
-            if self.banco:
-                self.banco.fechar_conexao()
-                self.banco = None
-
-    def abrir_dashboard(self, email_logado, cargo):
-        try:
-            self.tela_dashboard = TelaDashboard(self.banco, email_logado, cargo, self.versao_atual)
-            self.tela_dashboard.sinal_logout.connect(self.realizar_logout)
-            self.tela_dashboard.show()
-            self.tela_login.close()
-        except Exception as e:
-            QMessageBox.critical(None, "Erro de Inicialização", f"Falha ao abrir o painel: {str(e)}")
+            QMessageBox.warning(self.tela_login, "Acesso Negado", "E-mail ou senha incorretos.")
 
     def realizar_logout(self):
         """Fecha o painel logado, limpa a sessão do banco e ressuscita a tela de login"""

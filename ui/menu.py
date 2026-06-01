@@ -10,7 +10,7 @@ from ui.components import (
     BotaoPrincipal, BotaoDemonstracao, CampoTexto, 
     COR_BEGE_FUNDO, COR_TEXTO_ESCURO, COR_INPUT_BORDAS
 )
-from ui.cadastro import JanelaCadastro
+from ui.registro import JanelaCadastro
 
 CAMINHO_ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
@@ -109,33 +109,18 @@ class TelaMenuInicial(QWidget):
         layout_central.addWidget(card)
 
     def disparar_autenticacao(self):
-        """Captura os dados inseridos e envia para validação no core"""
+        """Captura os dados inseridos com validação de campos vazios e envia para o core"""
         email = self.input_email.text().strip()
-        senha = self.input_senha.text()
+        senha = self.input_senha.text().strip()
+
+        if not email or not senha:
+            QMessageBox.warning(self, "Campos Vazios", "Por favor, preencha o e-mail e a senha.")
+            return
+
         self.sinal_autenticar.emit(email, senha)
 
-    def acessar_modo_demonstracao(self):
-        """Abre o Dashboard salvando a referência em memória para o app não fechar"""
-        try:
-            from ui.dashboard import TelaDashboard
-            from data.database import BancoDeDados # Importa a classe do banco
-
-            if self.banco is None:
-                print("[MENU] Banco era None. Inicializando banco em memória para o Modo Demo.")
-                self.banco = BancoDeDados(modo_demonstracao=True)
-            elif not self.banco.modo_demonstracao:
-                self.banco = BancoDeDados(modo_demonstracao=True)
-
-            self.dashboard = TelaDashboard(self.banco)
-            self.dashboard.show()
-        
-            self.sinal_modo_demonstracao.emit()
-            self.close()
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Não foi possível iniciar o painel: {str(e)}")
-
     def abrir_tela_cadastro(self):
-        """Abre a janela de cadastro passando o banco para verificar os códigos"""
+        """Abre a janela de cadastro passando o banco para verificar os códigos de convite"""
         if not self.banco:
             QMessageBox.critical(self, "Erro de Sistema", "Banco de dados local não inicializado.")
             return
@@ -143,21 +128,10 @@ class TelaMenuInicial(QWidget):
         tela_cad.exec()
 
     def disparar_recuperacao_senha(self):
-        """Dispara a rotina de recuperação com base no input_email corrigido"""
+        """Dispara a rotina de recuperação com base no input_email digitado"""
         email = self.input_email.text().strip()
         if not email:
             QMessageBox.warning(self, "Aviso", "Por favor, digite o seu e-mail no campo de login para receber o link de recuperação.")
             return 
          
         QMessageBox.information(self, "Recuperação de Conta", f"Um link para redefinição segura de senha foi enviado para o e-mail: {email}")
-
-    def login_fisico_clicado(self):
-        """Apenas captura os dados da tela e avisa o controlador"""
-        email = self.txt_email.text().strip()
-        senha = self.txt_senha.text().strip()
-
-        if not email or not senha:
-            QMessageBox.warning(self, "Campos Vazios", "Por favor, preencha o e-mail e a senha.")
-            return
-        
-        self.sinal_autenticar.emit(email, senha)
