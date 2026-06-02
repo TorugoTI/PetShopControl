@@ -4,7 +4,7 @@ import glob
 import shutil
 import base64
 
-from firebase_admin import credentials, db, firestore
+from firebase_admin import credentials, db, firestore, auth
 from datetime import datetime
 from dotenv import load_dotenv
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -16,6 +16,9 @@ class SincronizadorFirebase:
         self.versao_atual_app = "1.0.0"
         self.db_url = os.getenv("FIREBASE_DATABASE_URL")
         self.cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+        self.firebase = firebase_admin
+        self.auth = self.firebase.auth()
+        self.db = self.firebase.database()
         
         if not firebase_admin._apps:
             try:

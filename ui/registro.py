@@ -1,6 +1,8 @@
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLineEdit, QPushButton, QLabel, QMessageBox
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from google.cloud import firestore
+import os
 
 class JanelaCadastro(QDialog):
     def __init__(self, banco, auth, db):
@@ -68,7 +70,31 @@ class JanelaCadastro(QDialog):
         senha = self.txt_senha.text()
         codigo_digitado = self.txt_codigo.text().strip()
         
-        resultado = self.db.child("codigos_convite").get()
+        db = firestore.Client()
+    
+        docs = db.collection('codigos_convite').where('codigo', '==', codigo_digitado).stream()
+    
+        doc_encontrado = None
+        for doc in docs:
+            dados = doc.to_dict()
+            if dados.get('status') == 'Ativo':
+                doc_encontrado = doc
+                break
+            
+        if not doc_encontrado:
+            QMessageBox.critical(self, "Acesso Negado", "Código de cadastro inválido, expirado ou já utilizado!")
+            return
+        
+        try:
+            self.auth.create_user_with_email_and_password(email, senha)
+        
+            doc_encontrado.reference.update({'status': 'Utilizado'})
+        
+            QMessageBox.information(self, "Sucesso", "Conta criada com sucesso!")
+            self.accept()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao criar conta: {e}")
+            resultado = self.db.child("codigos_convite").get()
         
         if resultado.val() is None:
             QMessageBox.critical(self, "Erro", "Nenhum código de convite encontrado no servidor.")

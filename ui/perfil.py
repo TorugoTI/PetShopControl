@@ -1,12 +1,12 @@
-import shutil
-import os
-import uuid
-
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QLabel, QFrame, QFormLayout, QLabel, QPushButton, QMessageBox, QLineEdit, QInputDialog, QFileDialog, QListWidget
+from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QFrame, QFormLayout, QLabel, QPushButton, QMessageBox, QLineEdit, QInputDialog, QFileDialog, QListWidget
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt
 from ui.components import BotaoPrincipal, COR_TEXTO_ESCURO
 from data.firebase_sync import SincronizadorFirebase
+from firebase_admin import auth
+import shutil
+import os
+import uuid
 
 class TelaPerfil(QWidget):
     def __init__(self, email_logado, banco):
@@ -83,6 +83,18 @@ class TelaPerfil(QWidget):
             
         layout.addStretch()
 
+        self.txt_senha_antiga = QLineEdit()
+        self.txt_senha_antiga.setPlaceholderText("Senha atual")
+        self.txt_senha_antiga.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.txt_nova_senha = QLineEdit()
+        self.txt_nova_senha.setPlaceholderText("Nova senha")
+        self.txt_nova_senha.setEchoMode(QLineEdit.EchoMode.Password)
+
+        self.txt_confirmar_nova = QLineEdit()
+        self.txt_confirmar_nova.setPlaceholderText("Confirme a nova senha")
+        self.txt_confirmar_nova.setEchoMode(QLineEdit.EchoMode.Password)
+
     def gerar_codigo(self):
         novo_codigo = str(uuid.uuid4())[:8].upper()
         try:
@@ -98,12 +110,51 @@ class TelaPerfil(QWidget):
             QMessageBox.critical(self, "Erro", f"Falha ao gerar código: {e}")
 
     def abrir_troca_senha(self):
-        nova_senha, ok = QInputDialog.getText(self, "Alterar Senha", "Digite a nova senha:", QLineEdit.EchoMode.Password)
-        if ok and nova_senha:
-            cursor = self.banco.conexao.cursor()
-            cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha, self.email))
-            self.banco.conexao.commit()
-            QMessageBox.information(self, "Sucesso", "Senha alterada com êxito.")
+        dialog = DialogTrocaSenha(self)
+        if dialog.exec():
+            antiga = dialog.txt_antiga.text()
+            nova = dialog.txt_nova.text()
+            confirma = dialog.txt_confirma.text()
+
+            if nova != confirma:
+                QMessageBox.warning(self, "Erro", "As novas senhas não coincidem.")
+                return
+
+            try:
+                auth_instance = self.firebase.firebase.auth()
+                
+                user = auth_instance.sign_in_with_email_and_password(self.email, antiga)
+                
+                auth_instance.update_password(user['idToken'], nova)
+                
+                QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso!")
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Falha ao trocar senha. Verifique sua senha atual.\nErro: {e}")
+
+    def processar_troca_senha(self):
+        antiga = self.txt_senha_antiga.text()
+        nova = self.txt_nova_senha.text()
+        confirmacao = self.txt_confirmar_nova.text()
+        
+        if not antiga or not nova or not confirmacao:
+            QMessageBox.warning(self, "Erro", "Preencha todos os campos.")
+            return
+
+        if nova != confirmacao:
+            QMessageBox.warning(self, "Erro", "A nova senha e a confirmação não conferem.")
+            return
+            
+        try:
+            user = self.auth.sign_in_with_email_and_password(self.email, antiga)
+            
+            self.auth.update_password(user['idToken'], nova)
+            
+            QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso no Firebase!")
+            self.accept()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", "Falha ao alterar senha. Verifique se a senha atual está correta.")
+            print(f"[DEBUG] Erro Firebase: {e}")
 
     def restaurar_backup_local(self):
         caminho_backup, _ = QFileDialog.getOpenFileName(self, "Selecione o arquivo de Backup", "", "Arquivos DB (*.db)")
@@ -170,3 +221,24 @@ class TelaPerfil(QWidget):
         codigos = self.firebase.listar_codigos_ativos()
         for item in codigos:
             self.lista_codigos.addItem(item['codigo'])
+
+class DialogTrocaSenha(QDialog):
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Alterar Senha")
+        layout = QFormLayout(self)
+        
+        self.txt_antiga = QLineEdit()
+        self.txt_antiga.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_nova = QLineEdit()
+        self.txt_nova.setEchoMode(QLineEdit.EchoMode.Password)
+        self.txt_confirma = QLineEdit()
+        self.txt_confirma.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        layout.addRow("Senha Atual:", self.txt_antiga)
+        layout.addRow("Nova Senha:", self.txt_nova)
+        layout.addRow("Confirmar Nova:", self.txt_confirma)
+        
+        btn = QPushButton("Confirmar")
+        btn.clicked.connect(self.accept)
+        layout.addRow(btn)

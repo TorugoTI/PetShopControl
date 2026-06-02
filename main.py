@@ -38,6 +38,7 @@ class ControladorSistema:
         self.banco = None
         self.tela_login = None
         self.tela_dashboard = None
+        
 
     def rotina_de_backup():
         print("Executando backup automático...")
@@ -67,6 +68,16 @@ class ControladorSistema:
             self.banco.fechar_conexao()
         sys.exit(codigo_saida)
 
+        def inicializar_banco_se_vazio(banco):
+            cursor = banco.conexao.cursor()
+            tabelas = ["atendimentos", "tutores", "pets", "produtos", "usuarios"]
+            for tabela in tabelas:
+                cursor.execute(f"CREATE TABLE IF NOT EXISTS {tabela} (id INTEGER PRIMARY KEY)")
+            banco.conexao.commit()
+
+        if self.banco:
+            inicializar_banco_se_vazio(self.banco)
+
     def ativar_modo_demonstracao(self):
         print("[SISTEMA] Inicializando Modo Demonstração...")
         if self.banco:
@@ -74,6 +85,7 @@ class ControladorSistema:
             
         self.banco = BancoDeDados(modo_demonstracao=True)
         self.abrir_dashboard("demo@petshop.com", "Visitante (Modo Demo)")
+        
 
     def abrir_dashboard(self, email_logado, cargo):
         print(f"Abrindo dashboard para {email_logado} com cargo {cargo}")
@@ -89,6 +101,7 @@ class ControladorSistema:
 
     def processar_autenticacao(self, email, senha):
         """Valida as credenciais e define o nível de acesso do usuário"""
+
         try:
             print(f"[FIREBASE] Tentando autenticar: {email}")
             usuario_firebase = auth_firebase.sign_in_with_email_and_password(email.strip(), senha.strip())
@@ -109,6 +122,15 @@ class ControladorSistema:
         except Exception as erro_firebase:
             print(f"[ERRO AUTENTICAÇÃO]: {str(erro_firebase)}")
             QMessageBox.warning(self.tela_login, "Acesso Negado", "E-mail ou senha incorretos.")
+
+        def garantir_tabelas(self):
+            cursor = self.banco.conexao.cursor()
+            cursor.execute("CREATE TABLE IF NOT EXISTS atendimentos (id INTEGER PRIMARY KEY, cliente TEXT, pet TEXT, valor REAL)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS tutores (id INTEGER PRIMARY KEY, nome TEXT)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS pets (id INTEGER PRIMARY KEY, nome TEXT, tutor_id INTEGER)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY, nome TEXT, estoque INTEGER)")
+            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (email TEXT PRIMARY KEY, senha TEXT, perfil TEXT)")
+            self.banco.conexao.commit()
 
     def realizar_logout(self):
         try:

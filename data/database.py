@@ -191,6 +191,14 @@ class BancoDeDados:
         """
         cursor.execute(query, (hoje,))
         return cursor.fetchall()
+    
+    def inicializar_banco_se_vazio(banco):
+        cursor = banco.conexao.cursor()
+        cursor.execute("CREATE TABLE IF NOT EXISTS atendimentos (id INTEGER PRIMARY KEY, cliente TEXT, pet TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS tutores (id INTEGER PRIMARY KEY, nome TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS pets (id INTEGER PRIMARY KEY, nome TEXT)")
+        cursor.execute("CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY, nome TEXT)")
+        banco.conexao.commit()
 
     def fechar_conexao(self):
         if self.conexao:
