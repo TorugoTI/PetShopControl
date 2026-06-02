@@ -17,10 +17,12 @@ CAMINHO_ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 class TelaMenuInicial(QWidget):
     sinal_modo_demonstracao = pyqtSignal()
     sinal_autenticar = pyqtSignal(str, str)
+    sinal_abrir_cadastro = pyqtSignal()
 
-    def __init__(self, banco=None):
+    def __init__(self, banco, controlador):
         super().__init__()
         self.banco = banco 
+        self.controlador = controlador
         self.init_ui()
 
     def init_ui(self):
@@ -93,7 +95,7 @@ class TelaMenuInicial(QWidget):
         self.btn_cadastrar_link.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_cadastrar_link.setFont(QFont("Arial", 9))
         self.btn_cadastrar_link.setStyleSheet("background: transparent; color: #5A5550; border: none; text-decoration: underline;")
-        self.btn_cadastrar_link.clicked.connect(self.abrir_tela_cadastro)
+        self.btn_cadastrar_link.clicked.connect(self.sinal_abrir_cadastro.emit)
         layout_card.addWidget(self.btn_cadastrar_link)
 
         lbl_divisor = QLabel("----------------- OU -----------------")

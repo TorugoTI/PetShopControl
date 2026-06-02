@@ -73,7 +73,7 @@ class TelaDashboard(QWidget):
         self.aba_cadastros = TelaCadastroCentral(self.banco, atualizar_dashboard_callback=self.atualizar_dados_dashboard)
         self.aba_financeiro = TelaFinanceiro(self.banco)
         self.aba_estoque = TelaEstoque(self.banco)
-        self.aba_perfil = TelaPerfil(self.email_usuario)
+        self.aba_perfil = TelaPerfil(self.email_usuario, self.banco)
         self.aba_configuracoes = self.aba_perfil 
 
         self.conteudo_central.addWidget(self.aba_dashboard)

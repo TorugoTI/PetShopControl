@@ -1,6 +1,9 @@
 import sys
 import os
 import pyrebase
+import schedule
+import time
+import threading
 from dotenv import load_dotenv
 from PyQt6.QtCore import QSettings
 
@@ -20,11 +23,13 @@ chave_gemini = os.getenv("GEMINI_API_KEY")
 agenda_id = os.getenv("GOOGLE_CALENDAR_ID")
 firebase = pyrebase.initialize_app(config_firebase)
 auth_firebase = firebase.auth()
+db = firebase.database()
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from data.database import BancoDeDados
 from ui.menu import TelaMenuInicial
 from ui.dashboard import TelaDashboard
+from ui.registro import JanelaCadastro
 
 class ControladorSistema:
     def __init__(self):
@@ -34,9 +39,23 @@ class ControladorSistema:
         self.tela_login = None
         self.tela_dashboard = None
 
+    def rotina_de_backup():
+        print("Executando backup automático...")
+
+    schedule.every(7).days.do(rotina_de_backup)
+
+    def rodar_agendador():
+        while True:
+            schedule.run_pending()
+            time.sleep(1)
+
+    threading.Thread(target=rodar_agendador, daemon=True).start()
+
     def iniciar(self):
-        """Abre a tela de login isolada de conexões com o banco"""
-        self.tela_login = TelaMenuInicial()
+        """Abre a tela de login inicializando-a com as dependências necessárias"""
+        self.tela_login = TelaMenuInicial(self.banco, self)
+        
+        self.tela_login.sinal_abrir_cadastro.connect(self.abrir_cadastro)
         
         self.tela_login.sinal_modo_demonstracao.connect(self.ativar_modo_demonstracao)
         self.tela_login.sinal_autenticar.connect(self.processar_autenticacao)
@@ -92,7 +111,6 @@ class ControladorSistema:
             QMessageBox.warning(self.tela_login, "Acesso Negado", "E-mail ou senha incorretos.")
 
     def realizar_logout(self):
-        """Fecha o painel logado, limpa a sessão do banco e ressuscita a tela de login"""
         try:
             print("[SISTEMA] Processando encerramento de sessão...")
             
@@ -104,14 +122,25 @@ class ControladorSistema:
                 self.tela_dashboard.close()
                 self.tela_dashboard = None
                 
-            self.tela_login = TelaMenuInicial()
+            self.tela_login = TelaMenuInicial(self.banco, self)
+            
+            self.tela_login.sinal_abrir_cadastro.connect(self.abrir_cadastro)
             self.tela_login.sinal_modo_demonstracao.connect(self.ativar_modo_demonstracao)
             self.tela_login.sinal_autenticar.connect(self.processar_autenticacao)
-            self.tela_login.show()
             
-            print("[SISTEMA] Sessão finalizada. Retornado ao Menu Inicial.")
+            self.tela_login.show()
+            print("[SISTEMA] Sessão finalizada.")
         except Exception as e:
             QMessageBox.critical(None, "Erro ao Sair", f"Falha ao retornar para o menu: {str(e)}")
+    
+    def abrir_cadastro(self):
+        if self.banco is None:
+            self.banco = BancoDeDados(modo_demonstracao=False)
+            self.banco.conectar()
+            
+        from ui.registro import JanelaCadastro
+        janela = JanelaCadastro(self.banco, auth_firebase, db) 
+        janela.exec()
 
 if __name__ == "__main__":
     sistema = ControladorSistema()

@@ -12,6 +12,7 @@ class BancoDeDados:
         self.conectar()
 
     def conectar(self):
+        self.conexao = sqlite3.connect("petshop.db")
         """Estabelece a conexão com o banco de dados (RAM ou Físico)"""
         if self.modo_demonstracao:
             print("[BANCO] Conectando ao Banco Volátil em memória RAM...")

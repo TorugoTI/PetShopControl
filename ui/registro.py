@@ -3,9 +3,14 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 class JanelaCadastro(QDialog):
-    def __init__(self, banco):
+    def __init__(self, banco, auth, db):
         super().__init__()
+        if banco is None:
+            print("[ERRO CRÍTICO] JanelaCadastro recebeu banco nulo!")
+            return
+        self.auth = auth
         self.banco = banco
+        self.db = db
         self.init_ui()
         
     def init_ui(self):
@@ -57,34 +62,36 @@ class JanelaCadastro(QDialog):
         layout.addWidget(self.txt_codigo)
         layout.addWidget(btn_registrar)
 
+        
     def processar_cadastro(self):
         email = self.txt_email.text().strip()
         senha = self.txt_senha.text()
-        conf_senha = self.txt_confirmar_senha.text()
-        codigo = self.txt_codigo.text().strip()
+        codigo_digitado = self.txt_codigo.text().strip()
         
-        if not email or not senha or not codigo:
-            QMessageBox.warning(self, "Campos Vazios", "Todos os campos precisam ser preenchidos.")
-            return
-            
-        if senha != conf_senha:
-            QMessageBox.warning(self, "Senhas Divergentes", "As senhas digitadas não são iguais.")
-            return
-            
-        cursor = self.banco.conexao.cursor()
-        cursor.execute("SELECT status FROM codigos_convite WHERE codigo = ? AND status = 'Ativo'", (codigo,))
-        resultado = cursor.fetchone()
+        resultado = self.db.child("codigos_convite").get()
         
-        if not resultado:
-            QMessageBox.critical(self, "Acesso Negado", "Código de cadastro inválido, expirado ou já utilizado!")
+        if resultado.val() is None:
+            QMessageBox.critical(self, "Erro", "Nenhum código de convite encontrado no servidor.")
+            return
+
+        codigo_encontrado_key = None
+        
+        for item in resultado.each():
+            dados = item.val()
+            if dados.get("codigo") == codigo_digitado and dados.get("status") == "Ativo":
+                codigo_encontrado_key = item.key()
+                break
+        
+        if not codigo_encontrado_key:
+            QMessageBox.critical(self, "Acesso Negado", "Código inválido ou já utilizado!")
             return
             
         try:
-            cursor.execute("INSERT INTO usuarios (email, senha, perfil) VALUES (?, ?, 'funcionario')", (email, senha))
-            cursor.execute("UPDATE codigos_convite SET status = 'Utilizado' WHERE codigo = ?", (codigo,))
-            self.banco.conexao.commit()
+            self.auth.create_user_with_email_and_password(email, senha)
             
-            QMessageBox.information(self, "Sucesso!", "Conta criada com sucesso! Agora você já pode fazer login.")
+            self.db.child("codigos_convite").child(codigo_encontrado_key).update({"status": "Utilizado"})
+            
+            QMessageBox.information(self, "Sucesso", "Conta criada com sucesso!")
             self.accept()
-        except Exception:
-            QMessageBox.critical(self, "Erro", "Este e-mail já está cadastrado no sistema.")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao criar conta: {e}")
