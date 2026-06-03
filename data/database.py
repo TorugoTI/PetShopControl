@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import sys
 from dotenv import load_dotenv
 
 class BancoDeDados:
@@ -13,19 +14,15 @@ class BancoDeDados:
         self.criar_tabelas_padrao()
 
     def conectar(self):
-        self.conexao = sqlite3.connect("petshop.db")
-        """Estabelece a conexão com o banco de dados (RAM ou Físico)"""
         if self.modo_demonstracao:
             print("[BANCO] Conectando ao Banco Volátil em memória RAM...")
             self.conexao = sqlite3.connect(":memory:")
             self.criar_tabelas_padrao()
             self.injetar_dados_demonstracao()
         else:
-            diretorio_raiz = os.path.abspath(os.path.dirname(os.path.dirname(__file__)))
-            caminho_banco = os.path.join(diretorio_raiz, "petshop.db")
+            caminho_banco = BancoDeDados.obter_caminho_banco()
             
             print(f"[BANCO] Conectando ao Banco de Dados Físico: {caminho_banco}")
-            
             novo_banco = not os.path.exists(caminho_banco)
             
             self.conexao = sqlite3.connect(caminho_banco)
@@ -195,6 +192,14 @@ class BancoDeDados:
         print(f"[DEBUG] Atendimentos futuros encontrados: {len(dados)}")
         return dados
 
+    def obter_caminho_banco():
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+    
+        return os.path.join(base_dir, "petshop.db")
+    
     def fechar_conexao(self):
         if self.conexao:
             self.conexao.close()

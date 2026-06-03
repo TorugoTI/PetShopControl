@@ -7,24 +7,27 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
-
+from packaging import version
 from ui.components import COR_BEGE_FUNDO, COR_TEXTO_ESCURO
 from ui.cadastro_central import TelaCadastroCentral
 from ui.financeiro import TelaFinanceiro
 from ui.estoque import TelaEstoque
 from ui.perfil import TelaPerfil
+from data.firebase_sync import SincronizadorFirebase
 
 class TelaDashboard(QWidget):
     sinal_logout = pyqtSignal()
 
-    def __init__(self, banco, email_usuario, cargo, versao):
-        super().__init__() 
-        self.banco = banco
-        self.email_usuario = email_usuario
-        self.email_logado = email_usuario
+    def __init__(self, banco, email, cargo, versao_atual):
+        super().__init__()
+        self.email_usuario = email
+        self.email_logado = email
         self.cargo = cargo
-        self.versao = versao
+        self.banco = banco 
+        self.versao_atual = versao_atual
+        self.versao = versao_atual
         self.botoes_menu = {}
+        self.sync = SincronizadorFirebase()
         self.init_ui()
 
     def init_ui(self):
@@ -79,7 +82,7 @@ class TelaDashboard(QWidget):
         self.aba_cadastros = TelaCadastroCentral(self.banco, atualizar_dashboard_callback=self.atualizar_dados_dashboard)
         self.aba_financeiro = TelaFinanceiro(self.banco)
         self.aba_estoque = TelaEstoque(self.banco)
-        self.aba_perfil = TelaPerfil(self.email_usuario, self.banco, self.cargo)
+        self.aba_perfil = TelaPerfil(self.sync, self.email_usuario, self.banco, self.cargo)
         self.aba_configuracoes = self.aba_perfil 
 
         self.conteudo_central.addWidget(self.aba_dashboard)
@@ -87,6 +90,7 @@ class TelaDashboard(QWidget):
         self.conteudo_central.addWidget(self.aba_financeiro)
         self.conteudo_central.addWidget(self.aba_estoque)
         self.conteudo_central.addWidget(self.aba_perfil)
+        self.sync = SincronizadorFirebase()
 
         layout_principal.addWidget(menu_lateral)
         layout_principal.addWidget(self.conteudo_central)
@@ -153,23 +157,22 @@ class TelaDashboard(QWidget):
         self.atualizar_dados_dashboard()
 
     def checar_nova_versao(self):
-        dados_fb = self.firebase.verificar_atualizacao()
-        if not dados_fb:
-            QMessageBox.warning(self, "Erro", "Não foi possível conectar ao servidor.")
-            return
-
-        versao_remota = dados_fb.get('versao_recente')
-        url_download = dados_fb.get('url_download')
-
-        if versao_remota > self.versao_atual:
-            reply = QMessageBox.question(self, "Atualização Disponível", 
-                                         f"Nova versão {versao_remota} encontrada. Deseja baixar agora?",
-                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        try:
+            dados = self.banco.child("Configuracoes").get().val()
+            versao_remota = dados.get("Versao Recente")
+            url_download = dados.get("url_download")
+        
+            versao_atual = "1.0.0" 
+        
+            if version.parse(versao_remota) > version.parse(versao_atual):
+                msg = f"Nova versão {versao_remota} disponível! Deseja baixar agora?"
+                if QMessageBox.question(self, "Atualização", msg) == QMessageBox.Yes:
+                    self.baixar_atualizacao(url_download)
+            else:
+                QMessageBox.information(self, "Sistema", "Você já está na versão mais recente.")
             
-            if reply == QMessageBox.StandardButton.Yes:
-                self.baixar_atualizacao(url_download)
-        else:
-            QMessageBox.information(self, "Atualização", "Você já está usando a versão mais recente!")
+        except Exception as e:
+            print(f"Erro ao checar atualização: {e}")
 
     def baixar_atualizacao(self, url):
         import requests

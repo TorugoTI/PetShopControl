@@ -4,8 +4,8 @@ import glob
 import shutil
 import base64
 import pyrebase
-
-from firebase_admin import credentials, db, firestore, auth
+import sys
+from firebase_admin import credentials, firestore, auth
 from datetime import datetime
 from dotenv import load_dotenv
 from google.cloud.firestore_v1.base_query import FieldFilter
@@ -26,20 +26,28 @@ class SincronizadorFirebase:
         self.versao_atual_app = "1.0.0"
         self.db_url = os.getenv("FIREBASE_DATABASE_URL")
         self.cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        self.db = self.firebase.database()
+        self.fs_db = None
+        self.rt_db = None
         
+        if getattr(sys, 'frozen', False):
+            base_dir = os.path.dirname(sys.executable)
+        else:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        
+        self.caminho_chave = os.path.join(base_dir, 'config', 'firebase-key.json')
+
         if not firebase_admin._apps:
             try:
-                raiz_projeto = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                caminho_completo_chave = os.path.join(raiz_projeto, os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
-                
-                cred = credentials.Certificate(caminho_completo_chave)
-                firebase_admin.initialize_app(cred, {'databaseURL': os.getenv("FIREBASE_DATABASE_URL")})
-                print("[FIREBASE] Admin inicializado com sucesso!")
+                caminho = self.get_path_to_key()
+                cred = credentials.Certificate(caminho)
+                firebase_admin.initialize_app(cred, {
+                    'databaseURL': os.getenv("FIREBASE_DATABASE_URL")
+                })
             except Exception as e:
-                print(f"[ERRO] Falha ao inicializar o Firebase Admin: {e}")
+                print(f"[ERRO] Falha crítica: {e}")
 
-        self.db = firestore.client()
+        self.fs_db = firestore.client()
+        self.rt_db = self.firebase.database()
         
         self.pasta_backup = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backups")
         self._limpar_backups_antigos()
@@ -51,7 +59,7 @@ class SincronizadorFirebase:
                 'status': 'Ativo',
                 'criado_em': firestore.SERVER_TIMESTAMP
             }
-            self.db.collection('codigos_convite').add(dados)
+            self.fs_db.collection('codigos_convite').add(dados)
             print(f"[SUCESSO] Código {codigo} salvo no Firestore!")
             return True
         except Exception as e:
@@ -59,10 +67,9 @@ class SincronizadorFirebase:
             return False
 
     def listar_codigos_ativos(self):
-        """Busca apenas códigos com status 'Ativo' para o Admin."""
         try:
-            codigos_ref = self.db.collection('codigos_convite')
-            query = codigos_ref.where('status', '==', 'Ativo').stream()
+            codigos_ref = self.fs_db.collection('codigos_convite') 
+            query = codigos_ref.where(filter=FieldFilter('status', '==', 'Ativo')).stream()
             
             lista = [doc.to_dict() for doc in query]
             return lista
@@ -107,15 +114,16 @@ class SincronizadorFirebase:
         dados_backup = {"status": "backup_automatico", "data": datetime.now().isoformat()}
         return self.salvar_backup_firestore(conta_id, dados_backup)
 
-    def salvar_backup_firestore(self, conta_id, caminho_banco):
-        with open(caminho_banco, "rb") as f:
-            conteudo_base64 = base64.b64encode(f.read()).decode('utf-8')
-        
-        doc_ref = self.db.collection('backups').document(f"{conta_id}_{datetime.now().strftime('%Y%m%d')}")
-        doc_ref.set({
-            'arquivo_base64': conteudo_base64,
-            'data': datetime.now()
-        })
+    def salvar_backup_firestore(self, conta_id, dados_ou_caminho):
+        if isinstance(dados_ou_caminho, dict):
+            doc_ref = self.fs_db.collection('backups').document(f"{conta_id}_log_{datetime.now().strftime('%Y%m%d')}")
+            doc_ref.set(dados_ou_caminho)
+    
+        else:
+            with open(dados_ou_caminho, "rb") as f:
+                conteudo_base64 = base64.b64encode(f.read()).decode('utf-8')
+            doc_ref = self.fs_db.collection('backups').document(f"{conta_id}_{datetime.now().strftime('%Y%m%d')}")
+            doc_ref.set({'arquivo_base64': conteudo_base64, 'data': datetime.now()})
 
     def alterar_senha(self, token_usuario, nova_senha):
         try:
@@ -205,8 +213,17 @@ class SincronizadorFirebase:
         
     def verificar_atualizacao(self):
         try:
-            data = self.db.child("configuracoes").get().val()
+            data = self.rt_db.child("configuracoes").get().val()
             return data
         except Exception as e:
             print(f"[ERRO] Falha ao verificar atualização: {e}")
             return None
+        
+    @staticmethod
+    def get_path_to_key():
+        if getattr(sys, 'frozen', False):
+            base_dir = sys._MEIPASS
+        else:
+            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+        
+        return os.path.join(base_dir, 'config', 'firebase-key.json')

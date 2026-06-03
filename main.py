@@ -79,23 +79,31 @@ class ControladorSistema:
             inicializar_banco_se_vazio(self.banco)
 
     def ativar_modo_demonstracao(self):
-        print("[SISTEMA] Inicializando Modo Demonstração...")
-        if self.banco:
-            self.banco.fechar_conexao()
+        print("DEBUG: Iniciando modo demo...")
+        try:
+            print("DEBUG: Tentando abrir banco demo...")
+            print("[SISTEMA] Inicializando Modo Demonstração...")
+            if self.banco:
+                self.banco.fechar_conexao()
             
-        self.banco = BancoDeDados(modo_demonstracao=True)
-        self.abrir_dashboard("demo@petshop.com", "Visitante (Modo Demo)")
+            self.banco = BancoDeDados(modo_demonstracao=True)
+            
+            self.abrir_dashboard("demo@petshop.com", "Visitante (Modo Demo)", self.versao_atual)
+            
+            print("DEBUG: Sucesso!")
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            input("Pressione ENTER para fechar...")
         
 
-    def abrir_dashboard(self, email_logado, cargo):
-        print(f"Abrindo dashboard para {email_logado} com cargo {cargo}")
-        
-        self.tela_dashboard = TelaDashboard(self.banco, email_logado, cargo, self.versao_atual)
-        
-        self.tela_dashboard.sinal_logout.connect(self.realizar_logout)
-        
+    def abrir_dashboard(self, email, cargo, versao):
+        print(f"Abrindo dashboard para {email} com cargo {cargo}")
+
+        self.tela_dashboard = TelaDashboard(self.banco, email, cargo, versao)
         self.tela_dashboard.show()
-        
+        self.tela_dashboard.sinal_logout.connect(self.realizar_logout)
+                
         if self.tela_login:
             self.tela_login.close()
 
@@ -117,7 +125,7 @@ class ControladorSistema:
             
             self.banco = BancoDeDados(modo_demonstracao=False)
 
-            self.abrir_dashboard(email_logado=email_limpo, cargo=cargo_usuario)
+            self.abrir_dashboard(email, cargo_usuario, self.versao_atual)
             
         except Exception as erro_firebase:
             print(f"[DEBUG] Erro real: {type(erro_firebase).__name__}: {str(erro_firebase)}")

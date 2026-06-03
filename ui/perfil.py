@@ -8,9 +8,10 @@ import os
 import uuid
 
 class TelaPerfil(QWidget):
-    def __init__(self, email_logado, banco, cargo):
-        
+    def __init__(self, sync_instance, email_logado, banco, cargo):
         super().__init__()
+        self.sync = sync_instance
+        self.auth = self.sync.auth
         self.cargo = cargo
         self.banco = banco
         self.email = email_logado
@@ -221,8 +222,11 @@ class TelaPerfil(QWidget):
     
         for item in codigos:
             codigo = item.get('codigo', 'Sem código')
-            self.lista_codigos.addItem(codigo) # Adiciona um por um
+            self.lista_codigos.addItem(codigo)
             print(f"[DEBUG] Código carregado: {codigo}")
+
+    def carregar_codigos_admin(self):
+        codigos = self.sync.listar_codigos_ativos()
 
 class DialogTrocaSenha(QDialog):
     def __init__(self, parent=None):
