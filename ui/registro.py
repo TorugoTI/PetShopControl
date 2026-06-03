@@ -69,55 +69,31 @@ class JanelaCadastro(QDialog):
         email = self.txt_email.text().strip()
         senha = self.txt_senha.text()
         codigo_digitado = self.txt_codigo.text().strip()
-        
-        db = firestore.Client()
     
-        docs = db.collection('codigos_convite').where('codigo', '==', codigo_digitado).stream()
+        from google.cloud.firestore_v1.base_query import FieldFilter
+        db = firestore.Client()
+        docs = db.collection('codigos_convite').where(filter=FieldFilter('codigo', '==', codigo_digitado)).stream()
     
         doc_encontrado = None
         for doc in docs:
-            dados = doc.to_dict()
-            if dados.get('status') == 'Ativo':
+            if doc.to_dict().get('status') == 'Ativo':
                 doc_encontrado = doc
                 break
             
         if not doc_encontrado:
             QMessageBox.critical(self, "Acesso Negado", "Código de cadastro inválido, expirado ou já utilizado!")
             return
-        
+    
         try:
             self.auth.create_user_with_email_and_password(email, senha)
         
             doc_encontrado.reference.update({'status': 'Utilizado'})
-        
             QMessageBox.information(self, "Sucesso", "Conta criada com sucesso!")
             self.accept()
+        
         except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Falha ao criar conta: {e}")
-            resultado = self.db.child("codigos_convite").get()
-        
-        if resultado.val() is None:
-            QMessageBox.critical(self, "Erro", "Nenhum código de convite encontrado no servidor.")
-            return
-
-        codigo_encontrado_key = None
-        
-        for item in resultado.each():
-            dados = item.val()
-            if dados.get("codigo") == codigo_digitado and dados.get("status") == "Ativo":
-                codigo_encontrado_key = item.key()
-                break
-        
-        if not codigo_encontrado_key:
-            QMessageBox.critical(self, "Acesso Negado", "Código inválido ou já utilizado!")
-            return
-            
-        try:
-            self.auth.create_user_with_email_and_password(email, senha)
-            
-            self.db.child("codigos_convite").child(codigo_encontrado_key).update({"status": "Utilizado"})
-            
-            QMessageBox.information(self, "Sucesso", "Conta criada com sucesso!")
-            self.accept()
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Falha ao criar conta: {e}")
+            erro_str = str(e)
+            if "EMAIL_EXISTS" in erro_str:
+                QMessageBox.warning(self, "Erro", "Este e-mail já está cadastrado no sistema.")
+            else:
+                QMessageBox.critical(self, "Erro", f"Falha ao criar conta: {e}")

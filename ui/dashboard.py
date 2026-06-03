@@ -1,4 +1,5 @@
 import sys
+import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QTableWidget, QTableWidgetItem, QHeaderView, QStackedWidget, 
@@ -65,6 +66,11 @@ class TelaDashboard(QWidget):
         btn_logout.clicked.connect(self.sinal_logout.emit)
         layout_menu.addWidget(btn_logout)
 
+        btn_atualizar = QPushButton("🔄 Verificar Atualizações")
+        btn_atualizar.setStyleSheet("color: #2980B9; border: none; font-weight: bold;")
+        btn_atualizar.clicked.connect(self.checar_nova_versao)
+        layout_menu.addWidget(btn_atualizar)
+
         self.conteudo_central = QStackedWidget()
         
         self.aba_dashboard = QWidget()
@@ -73,7 +79,7 @@ class TelaDashboard(QWidget):
         self.aba_cadastros = TelaCadastroCentral(self.banco, atualizar_dashboard_callback=self.atualizar_dados_dashboard)
         self.aba_financeiro = TelaFinanceiro(self.banco)
         self.aba_estoque = TelaEstoque(self.banco)
-        self.aba_perfil = TelaPerfil(self.email_usuario, self.banco)
+        self.aba_perfil = TelaPerfil(self.email_usuario, self.banco, self.cargo)
         self.aba_configuracoes = self.aba_perfil 
 
         self.conteudo_central.addWidget(self.aba_dashboard)
@@ -140,27 +146,42 @@ class TelaDashboard(QWidget):
         self.conteudo_central.setCurrentIndex(index)
         for idx, btn in self.botoes_menu.items():
             btn.setStyleSheet("background-color: #D1C7BD;" if idx == index else "background: transparent; color: #3A3530;")
-
-    def buscar_atendimentos_futuros(self):
-        from datetime import datetime
-        hoje = datetime.now().strftime("%Y-%m-%d")
-        
-        cursor = self.conexao.cursor()
-        query = """
-            SELECT a.id, t.nome, a.servico, a.data_atendimento, a.hora_atendimento, a.valor
-            FROM atendimentos a
-            JOIN pets p ON a.pet_id = p.id
-            JOIN tutores t ON p.tutor_id = t.id
-            WHERE a.data_atendimento >= ? 
-            AND (a.status != 'Concluído' OR a.status IS NULL OR a.status = '')
-            ORDER BY a.data_atendimento, a.hora_atendimento
-        """
-        cursor.execute(query, (hoje,))
-        dados = cursor.fetchall()
-        print(f"[DEBUG] Atendimentos futuros encontrados: {len(dados)}")
-        return dados
     
     def showEvent(self, event):
         """Sempre que a tela for exibida/focada, atualiza os dados."""
         super().showEvent(event)
         self.atualizar_dados_dashboard()
+
+    def checar_nova_versao(self):
+        dados_fb = self.firebase.verificar_atualizacao()
+        if not dados_fb:
+            QMessageBox.warning(self, "Erro", "Não foi possível conectar ao servidor.")
+            return
+
+        versao_remota = dados_fb.get('versao_recente')
+        url_download = dados_fb.get('url_download')
+
+        if versao_remota > self.versao_atual:
+            reply = QMessageBox.question(self, "Atualização Disponível", 
+                                         f"Nova versão {versao_remota} encontrada. Deseja baixar agora?",
+                                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                self.baixar_atualizacao(url_download)
+        else:
+            QMessageBox.information(self, "Atualização", "Você já está usando a versão mais recente!")
+
+    def baixar_atualizacao(self, url):
+        import requests
+        caminho_salvar = "atualizacao_setup.exe"
+        
+        try:
+            response = requests.get(url)
+            with open(caminho_salvar, 'wb') as f:
+                f.write(response.content)
+            
+            QMessageBox.information(self, "Sucesso", "Download concluído. O instalador será aberto.")
+            os.startfile(caminho_salvar)
+            sys.exit()
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha no download: {e}")

@@ -120,17 +120,11 @@ class ControladorSistema:
             self.abrir_dashboard(email_logado=email_limpo, cargo=cargo_usuario)
             
         except Exception as erro_firebase:
-            print(f"[ERRO AUTENTICAÇÃO]: {str(erro_firebase)}")
-            QMessageBox.warning(self.tela_login, "Acesso Negado", "E-mail ou senha incorretos.")
-
-        def garantir_tabelas(self):
-            cursor = self.banco.conexao.cursor()
-            cursor.execute("CREATE TABLE IF NOT EXISTS atendimentos (id INTEGER PRIMARY KEY, cliente TEXT, pet TEXT, valor REAL)")
-            cursor.execute("CREATE TABLE IF NOT EXISTS tutores (id INTEGER PRIMARY KEY, nome TEXT)")
-            cursor.execute("CREATE TABLE IF NOT EXISTS pets (id INTEGER PRIMARY KEY, nome TEXT, tutor_id INTEGER)")
-            cursor.execute("CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY, nome TEXT, estoque INTEGER)")
-            cursor.execute("CREATE TABLE IF NOT EXISTS usuarios (email TEXT PRIMARY KEY, senha TEXT, perfil TEXT)")
-            self.banco.conexao.commit()
+            print(f"[DEBUG] Erro real: {type(erro_firebase).__name__}: {str(erro_firebase)}")
+            import traceback
+            traceback.print_exc()
+    
+            QMessageBox.warning(self.tela_login, "Erro no Sistema", f"Detalhes: {str(erro_firebase)}")
 
     def realizar_logout(self):
         try:

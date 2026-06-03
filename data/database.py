@@ -10,6 +10,7 @@ class BancoDeDados:
         self.conexao = None
         
         self.conectar()
+        self.criar_tabelas_padrao()
 
     def conectar(self):
         self.conexao = sqlite3.connect("petshop.db")
@@ -75,12 +76,11 @@ class BancoDeDados:
             CREATE TABLE IF NOT EXISTS atendimentos (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 pet_id INTEGER,
-                servico TEXT NOT NULL,
+                servico TEXT,
                 data_atendimento TEXT,
                 hora_atendimento TEXT,
                 valor REAL,
-                status TEXT,
-                FOREIGN KEY (pet_id) REFERENCES pets(id)
+                status TEXT
             )
         """)
 
@@ -174,31 +174,26 @@ class BancoDeDados:
         except Exception as e:
             print(f"Erro ao contar clientes: {e}")
             return 0
-
+    
     def buscar_atendimentos_futuros(self):
         """Busca atendimentos que ainda não ocorreram."""
         from datetime import datetime
         hoje = datetime.now().strftime("%Y-%m-%d")
-    
+        
         cursor = self.conexao.cursor()
         query = """
             SELECT a.id, t.nome, a.servico, a.data_atendimento, a.hora_atendimento, a.valor
             FROM atendimentos a
             JOIN pets p ON a.pet_id = p.id
             JOIN tutores t ON p.tutor_id = t.id
-            WHERE a.data_atendimento >= ? AND (a.status != 'Concluído' OR a.status IS NULL)
-            ORDER BY a.data_atendimento ASC, a.hora_atendimento ASC
+            WHERE a.data_atendimento >= ? 
+            AND (a.status != 'Concluído' OR a.status IS NULL OR a.status = '')
+            ORDER BY a.data_atendimento, a.hora_atendimento
         """
         cursor.execute(query, (hoje,))
-        return cursor.fetchall()
-    
-    def inicializar_banco_se_vazio(banco):
-        cursor = banco.conexao.cursor()
-        cursor.execute("CREATE TABLE IF NOT EXISTS atendimentos (id INTEGER PRIMARY KEY, cliente TEXT, pet TEXT)")
-        cursor.execute("CREATE TABLE IF NOT EXISTS tutores (id INTEGER PRIMARY KEY, nome TEXT)")
-        cursor.execute("CREATE TABLE IF NOT EXISTS pets (id INTEGER PRIMARY KEY, nome TEXT)")
-        cursor.execute("CREATE TABLE IF NOT EXISTS produtos (id INTEGER PRIMARY KEY, nome TEXT)")
-        banco.conexao.commit()
+        dados = cursor.fetchall()
+        print(f"[DEBUG] Atendimentos futuros encontrados: {len(dados)}")
+        return dados
 
     def fechar_conexao(self):
         if self.conexao:

@@ -3,34 +3,41 @@ import firebase_admin
 import glob
 import shutil
 import base64
+import pyrebase
 
 from firebase_admin import credentials, db, firestore, auth
 from datetime import datetime
 from dotenv import load_dotenv
 from google.cloud.firestore_v1.base_query import FieldFilter
 
+
 load_dotenv()
 
 class SincronizadorFirebase:
     def __init__(self):
+        config = {
+            "apiKey": os.getenv("FIREBASE_API_KEY"),
+            "authDomain": os.getenv("FIREBASE_AUTH_DOMAIN"),
+            "databaseURL": os.getenv("FIREBASE_DATABASE_URL"),
+            "storageBucket": os.getenv("FIREBASE_STORAGE_BUCKET")
+        }
+        self.firebase = pyrebase.initialize_app(config)
+        self.auth = self.firebase.auth()
         self.versao_atual_app = "1.0.0"
         self.db_url = os.getenv("FIREBASE_DATABASE_URL")
         self.cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        self.firebase = firebase_admin
-        self.auth = self.firebase.auth()
         self.db = self.firebase.database()
         
         if not firebase_admin._apps:
             try:
                 raiz_projeto = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                caminho_completo_chave = os.path.join(raiz_projeto, self.cred_path)
+                caminho_completo_chave = os.path.join(raiz_projeto, os.getenv("GOOGLE_APPLICATION_CREDENTIALS"))
                 
                 cred = credentials.Certificate(caminho_completo_chave)
-                firebase_admin.initialize_app(cred, {'databaseURL': self.db_url})
-                print("[FIREBASE] Conectado com sucesso!")
+                firebase_admin.initialize_app(cred, {'databaseURL': os.getenv("FIREBASE_DATABASE_URL")})
+                print("[FIREBASE] Admin inicializado com sucesso!")
             except Exception as e:
-                print(f"[ERRO] Falha ao inicializar o Firebase: {e}")
-                return
+                print(f"[ERRO] Falha ao inicializar o Firebase Admin: {e}")
 
         self.db = firestore.client()
         
@@ -110,6 +117,24 @@ class SincronizadorFirebase:
             'data': datetime.now()
         })
 
+    def alterar_senha(self, token_usuario, nova_senha):
+        try:
+            self.auth.update_email_password(token_usuario, None, nova_senha)
+            return True
+        except Exception as e:
+            print(f"[ERRO] Falha ao alterar senha: {e}")
+            return False
+
+    def alterar_senha_admin(self, email, nova_senha):
+        """Usa o SDK Admin para alterar a senha diretamente."""
+        try:
+            user = auth.get_user_by_email(email)
+            auth.update_user(user.uid, password=nova_senha)
+            return True
+        except Exception as e:
+            print(f"[ERRO] Falha ao atualizar senha via Admin SDK: {e}")
+            return False
+
     def restaurar_backup_firestore(self, conta_id, data_backup):
         """Baixa os dados do Firestore e reconstrói o banco (exemplo conceitual)."""
         try:
@@ -136,8 +161,12 @@ class SincronizadorFirebase:
     
     def listar_codigos_ativos(self):
         try:
-            query = self.db.collection('codigos_convite').where(filter=FieldFilter("status", "==", "Ativo")).stream()
-            return [doc.to_dict() for doc in query]
+            codigos_ref = self.db.collection('codigos_convite') 
+            query = codigos_ref.where(filter=FieldFilter('status', '==', 'Ativo')).stream()
+        
+            lista = [doc.to_dict() for doc in query]
+            print(f"[DEBUG] Códigos encontrados no Firebase: {len(lista)}")
+            return lista
         except Exception as e:
             print(f"[ERRO Firestore] Falha ao listar: {e}")
             return []
@@ -173,3 +202,11 @@ class SincronizadorFirebase:
         except Exception as e:
             print(f"[ERRO] Falha ao listar backups na nuvem: {e}")
             return []
+        
+    def verificar_atualizacao(self):
+        try:
+            data = self.db.child("configuracoes").get().val()
+            return data
+        except Exception as e:
+            print(f"[ERRO] Falha ao verificar atualização: {e}")
+            return None

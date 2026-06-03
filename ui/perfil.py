@@ -3,14 +3,15 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt
 from ui.components import BotaoPrincipal, COR_TEXTO_ESCURO
 from data.firebase_sync import SincronizadorFirebase
-from firebase_admin import auth
 import shutil
 import os
 import uuid
 
 class TelaPerfil(QWidget):
-    def __init__(self, email_logado, banco):
+    def __init__(self, email_logado, banco, cargo):
+        
         super().__init__()
+        self.cargo = cargo
         self.banco = banco
         self.email = email_logado
         self.firebase = SincronizadorFirebase()
@@ -72,7 +73,7 @@ class TelaPerfil(QWidget):
         layout.addWidget(QLabel("<b>Códigos Ativos na Nuvem:</b>"))
         layout.addWidget(self.lista_codigos)
     
-        self.carregar_codigos_admin()
+        self.carregar_codigos()
             
         if is_demo:
             lbl_aviso = QLabel("⚠️ Modo demonstração: Ações administrativas bloqueadas.")
@@ -120,16 +121,10 @@ class TelaPerfil(QWidget):
                 QMessageBox.warning(self, "Erro", "As novas senhas não coincidem.")
                 return
 
-            try:
-                auth_instance = self.firebase.firebase.auth()
-                
-                user = auth_instance.sign_in_with_email_and_password(self.email, antiga)
-                
-                auth_instance.update_password(user['idToken'], nova)
-                
+            if self.firebase.alterar_senha_admin(self.email, nova):
                 QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso!")
-            except Exception as e:
-                QMessageBox.critical(self, "Erro", f"Falha ao trocar senha. Verifique sua senha atual.\nErro: {e}")
+            else:
+                QMessageBox.critical(self, "Erro", "Falha ao comunicar com o Firebase.")
 
     def processar_troca_senha(self):
         antiga = self.txt_senha_antiga.text()
@@ -216,11 +211,18 @@ class TelaPerfil(QWidget):
         else:
             QMessageBox.critical(self, "Nuvem", "Falha ao enviar backup.")
     
-    def carregar_codigos_admin(self):
-        self.lista_codigos.clear()
+    def carregar_codigos(self):
+        if self.cargo != "Administrador Master":
+            return
+    
+        self.lista_codigos.clear() 
+    
         codigos = self.firebase.listar_codigos_ativos()
+    
         for item in codigos:
-            self.lista_codigos.addItem(item['codigo'])
+            codigo = item.get('codigo', 'Sem código')
+            self.lista_codigos.addItem(codigo) # Adiciona um por um
+            print(f"[DEBUG] Código carregado: {codigo}")
 
 class DialogTrocaSenha(QDialog):
     def __init__(self, parent=None):
