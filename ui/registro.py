@@ -69,7 +69,11 @@ class JanelaCadastro(QDialog):
         email = self.txt_email.text().strip()
         senha = self.txt_senha.text()
         codigo_digitado = self.txt_codigo.text().strip()
-    
+        
+        if not email or not senha or not codigo_digitado:
+            QMessageBox.warning(self, "Campos Vazios", "Por favor, preencha todos os campos.")
+            return
+
         from google.cloud.firestore_v1.base_query import FieldFilter
         db = firestore.Client()
         docs = db.collection('codigos_convite').where(filter=FieldFilter('codigo', '==', codigo_digitado)).stream()
@@ -81,13 +85,17 @@ class JanelaCadastro(QDialog):
                 break
             
         if not doc_encontrado:
-            QMessageBox.critical(self, "Acesso Negado", "Código de cadastro inválido, expirado ou já utilizado!")
+            QMessageBox.critical(self, "Acesso Negado", "Código de cadastro inválido, já utilizado ou expirado!")
             return
     
         try:
             self.auth.create_user_with_email_and_password(email, senha)
-        
-            doc_encontrado.reference.update({'status': 'Utilizado'})
+            
+            doc_encontrado.reference.update({
+                'status': 'Utilizado',
+                'email_associado': email
+            })
+            
             QMessageBox.information(self, "Sucesso", "Conta criada com sucesso!")
             self.accept()
         

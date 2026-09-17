@@ -1,15 +1,14 @@
 import os
-import firebase_admin
 import glob
 import shutil
 import base64
 import pyrebase
 import sys
+import firebase_admin
 from firebase_admin import credentials, firestore, auth
 from datetime import datetime
 from dotenv import load_dotenv
 from google.cloud.firestore_v1.base_query import FieldFilter
-
 
 load_dotenv()
 
@@ -23,34 +22,88 @@ class SincronizadorFirebase:
         }
         self.firebase = pyrebase.initialize_app(config)
         self.auth = self.firebase.auth()
-        self.versao_atual_app = "1.0.0"
-        self.db_url = os.getenv("FIREBASE_DATABASE_URL")
-        self.cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-        self.fs_db = None
-        self.rt_db = None
-        
-        if getattr(sys, 'frozen', False):
-            base_dir = os.path.dirname(sys.executable)
-        else:
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        
-        self.caminho_chave = os.path.join(base_dir, 'config', 'firebase-key.json')
-
-        if not firebase_admin._apps:
-            try:
-                caminho = self.get_path_to_key()
-                cred = credentials.Certificate(caminho)
-                firebase_admin.initialize_app(cred, {
-                    'databaseURL': os.getenv("FIREBASE_DATABASE_URL")
-                })
-            except Exception as e:
-                print(f"[ERRO] Falha crítica: {e}")
-
-        self.fs_db = firestore.client()
         self.rt_db = self.firebase.database()
+        self.versao_atual_app = "1.0.0"
         
-        self.pasta_backup = os.path.join(os.path.dirname(os.path.dirname(__file__)), "backups")
+        if not firebase_admin._apps:
+            cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+        
+        self.db = firestore.client() 
+        self.fs_db = self.db 
+        
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.pasta_backup = os.path.join(base_dir, "backups")
+        self.caminho_db_local = os.path.join(base_dir, "data", "petshop.db")
+        
+        os.makedirs(self.pasta_backup, exist_ok=True)
         self._limpar_backups_antigos()
+
+    def restaurar_backup_local(self, caminho_arquivo_origem):
+        """Sobrescreve o banco de dados local com o arquivo escolhido."""
+        try:
+            os.makedirs(os.path.dirname(self.caminho_db_local), exist_ok=True)
+            shutil.copy(caminho_arquivo_origem, self.caminho_db_local)
+            print(f"[SUCESSO] Backup local restaurado de {caminho_arquivo_origem}.")
+            return True
+        except Exception as e:
+            print(f"[ERRO] Falha na restauração local: {e}")
+            return False
+
+    def fazer_backup_local_gerenciado(self):
+        """Salva uma cópia datada na pasta local /backups/."""
+        try:
+            os.makedirs(self.pasta_backup, exist_ok=True)
+            nome_arq = f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"
+            destino = os.path.join(self.pasta_backup, nome_arq)
+            if os.path.exists(self.caminho_db_local):
+                shutil.copy(self.caminho_db_local, destino)
+                self._limpar_backups_antigos()
+                return destino
+            return None
+        except Exception as e:
+            print(f"[ERRO] Falha ao gerar backup local gerenciado: {e}")
+            return None
+
+    def carregar_dados_backup_nuvem(self, doc_id):
+        """Baixa o backup do Firestore e retorna os bytes decodificados."""
+        try:
+            doc_ref = self.db.collection('backups').document(doc_id)
+            doc = doc_ref.get()
+            if doc.exists:
+                dados = doc.to_dict()
+                conteudo_base64 = dados.get('arquivo_base64')
+                if conteudo_base64:
+                    return base64.b64decode(conteudo_base64)
+            return None
+        except Exception as e:
+            print(f"[ERRO] Falha ao carregar bytes do backup da nuvem: {e}")
+            return None
+
+    def baixar_e_aplicar_backup(self, doc_id):
+        """Baixa o backup do Firestore e sobrescreve o arquivo .db local."""
+        try:
+            bytes_db = self.carregar_dados_backup_nuvem(doc_id)
+            if bytes_db:
+                os.makedirs(os.path.dirname(self.caminho_db_local), exist_ok=True)
+                with open(self.caminho_db_local, "wb") as f:
+                    f.write(bytes_db)
+                print(f"[SUCESSO] Backup {doc_id} restaurado e aplicado localmente.")
+                return True
+            return False
+        except Exception as e:
+            print(f"[ERRO] Falha ao baixar/aplicar backup da nuvem: {e}")
+            return False
+
+    def listar_codigos_ativos(self):
+        try:
+            codigos_ref = self.db.collection('codigos_convite') 
+            query = codigos_ref.where(filter=FieldFilter('status', '==', 'Ativo')).stream()
+            return [doc.to_dict() for doc in query]
+        except Exception as e:
+            print(f"[ERRO Firestore] Falha ao listar códigos: {e}")
+            return []
 
     def salvar_codigo_convite(self, codigo):
         try:
@@ -60,170 +113,75 @@ class SincronizadorFirebase:
                 'criado_em': firestore.SERVER_TIMESTAMP
             }
             self.fs_db.collection('codigos_convite').add(dados)
-            print(f"[SUCESSO] Código {codigo} salvo no Firestore!")
             return True
         except Exception as e:
-            print(f"[ERRO Firestore] Falha ao salvar: {e}")
+            print(f"[ERRO Firestore] Falha ao salvar código: {e}")
             return False
-
-    def listar_codigos_ativos(self):
-        try:
-            codigos_ref = self.fs_db.collection('codigos_convite') 
-            query = codigos_ref.where(filter=FieldFilter('status', '==', 'Ativo')).stream()
-            
-            lista = [doc.to_dict() for doc in query]
-            return lista
-        except Exception as e:
-            print(f"[ERRO Firestore] Falha ao listar: {e}")
-            return []
             
     def _limpar_backups_antigos(self):
-        """Método privado para rodar na inicialização."""
         if not os.path.exists(self.pasta_backup): return
-        
         arquivos = glob.glob(os.path.join(self.pasta_backup, "backup_*.db"))
         arquivos.sort(key=os.path.getctime)
-        
-        while len(arquivos) > 2:
+        while len(arquivos) > 5:
             os.remove(arquivos[0])
-            print(f"[LIMPEZA] Backup local antigo removido: {arquivos[0]}")
             arquivos.pop(0)
 
     def marcar_codigo_como_usado(self, codigo):
-        """Atualiza o status para 'Usado' após a criação da conta."""
         try:
-            docs = self.db.collection('codigos_convite').where('codigo', '==', codigo).stream()
+            docs = self.db.collection('codigos_convite').where(filter=FieldFilter('codigo', '==', codigo)).stream()
             for doc in docs:
                 doc.reference.update({'status': 'Usado'})
             return True
         except Exception as e:
             return False
 
-    def salvar_backup_resumido_firestore(self, dados_essenciais):
-        """Salva um documento no Firestore com o estado atual do banco."""
-        doc_ref = self.db.collection('backups').document(datetime.now().strftime("%Y%m%d"))
-        doc_ref.set({
-            'data': datetime.now(),
-            'conteudo': dados_essenciais,
-            'versao': self.versao_atual_app
-        })
-
-        backups = self.db.collection('backups').order_by('data').limit_to_last(2).stream()
-
-    def enviar_backup_semanal_com_retencao(self, conta_id):
-        dados_backup = {"status": "backup_automatico", "data": datetime.now().isoformat()}
-        return self.salvar_backup_firestore(conta_id, dados_backup)
-
-    def salvar_backup_firestore(self, conta_id, dados_ou_caminho):
-        if isinstance(dados_ou_caminho, dict):
-            doc_ref = self.fs_db.collection('backups').document(f"{conta_id}_log_{datetime.now().strftime('%Y%m%d')}")
-            doc_ref.set(dados_ou_caminho)
-    
-        else:
-            with open(dados_ou_caminho, "rb") as f:
-                conteudo_base64 = base64.b64encode(f.read()).decode('utf-8')
-            doc_ref = self.fs_db.collection('backups').document(f"{conta_id}_{datetime.now().strftime('%Y%m%d')}")
-            doc_ref.set({'arquivo_base64': conteudo_base64, 'data': datetime.now()})
-
-    def alterar_senha(self, token_usuario, nova_senha):
+    def enviar_backup_oficial_nuvem(self, conta_id):
+        """Força o envio do arquivo .db real codificado em base64 para o Firestore."""
         try:
-            self.auth.update_email_password(token_usuario, None, nova_senha)
-            return True
-        except Exception as e:
-            print(f"[ERRO] Falha ao alterar senha: {e}")
-            return False
-
-    def alterar_senha_admin(self, email, nova_senha):
-        """Usa o SDK Admin para alterar a senha diretamente."""
-        try:
-            user = auth.get_user_by_email(email)
-            auth.update_user(user.uid, password=nova_senha)
-            return True
-        except Exception as e:
-            print(f"[ERRO] Falha ao atualizar senha via Admin SDK: {e}")
-            return False
-
-    def restaurar_backup_firestore(self, conta_id, data_backup):
-        """Baixa os dados do Firestore e reconstrói o banco (exemplo conceitual)."""
-        try:
-            doc_ref = self.db.collection('backups').document(f"{conta_id}_{data_backup}")
-            doc = doc_ref.get()
-            if doc.exists:
-                dados = doc.to_dict()
-                print("Backup encontrado! Iniciando restauração...")
-                return True
-        except Exception as e:
-            print(f"[ERRO] Falha ao restaurar: {e}")
-            return False
-        
-    def restaurar_backup_local(self, caminho_arquivo_origem):
-        """Sobrescreve o banco de dados local com o arquivo escolhido."""
-        try:
-            caminho_banco_atual = os.path.join(os.path.dirname(os.path.dirname(__file__)), "petshop.db")
-            
-            shutil.copy(caminho_arquivo_origem, caminho_banco_atual)
-            return True
-        except Exception as e:
-            print(f"[ERRO] Falha na restauração: {e}")
-            return False
-    
-    def listar_codigos_ativos(self):
-        try:
-            codigos_ref = self.db.collection('codigos_convite') 
-            query = codigos_ref.where(filter=FieldFilter('status', '==', 'Ativo')).stream()
-        
-            lista = [doc.to_dict() for doc in query]
-            print(f"[DEBUG] Códigos encontrados no Firebase: {len(lista)}")
-            return lista
-        except Exception as e:
-            print(f"[ERRO Firestore] Falha ao listar: {e}")
-            return []
-
-    def baixar_e_aplicar_backup(self, doc_id):
-        """Baixa o backup do Firestore e sobrescreve o arquivo .db local."""
-        try:
-            doc_ref = self.db.collection('backups').document(doc_id)
-            doc = doc_ref.get()
-            
-            if doc.exists:
-                dados = doc.to_dict()
-                conteudo_base64 = dados.get('arquivo_base64')
+            if not os.path.exists(self.caminho_db_local):
+                print(f"[ERRO] Banco local não encontrado em: {self.caminho_db_local}")
+                return False
                 
-                if conteudo_base64:
-                    caminho_banco = os.path.join(os.path.dirname(os.path.dirname(__file__)), "petshop.db")
-                    
-                    with open(caminho_banco, "wb") as f:
-                        f.write(base64.b64decode(conteudo_base64))
-                        
-                    print(f"[SUCESSO] Backup {doc_id} restaurado com sucesso.")
-                    return True
-            return False
+            with open(self.caminho_db_local, "rb") as f:
+                conteudo_base64 = base64.b64encode(f.read()).decode('utf-8')
+                
+            doc_id = f"db_{conta_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self.fs_db.collection('backups').document(doc_id).set({
+                'tipo': 'banco_sqlite',
+                'conta': conta_id,
+                'arquivo_base64': conteudo_base64,
+                'data': datetime.now(),
+                'versao': self.versao_atual_app
+            })
+            print(f"[SUCESSO] Backup oficial {doc_id} enviado para o Firestore.")
+            return True
         except Exception as e:
-            print(f"[ERRO] Falha ao baixar/aplicar backup da nuvem: {e}")
+            print(f"[ERRO Firestore] Falha ao enviar backup oficial: {e}")
             return False
 
     def listar_backups_nuvem(self):
-        """Lista os últimos 5 backups salvos no Firestore."""
+        """Lista os IDs de backups da nuvem que contêm arquivo binário do banco."""
         try:
-            docs = self.db.collection('backups').order_by('data', direction='DESCENDING').limit(5).stream()
-            return [doc.id for doc in docs]
+            docs = self.db.collection('backups').order_by('data', direction='DESCENDING').limit(20).stream()
+            lista_ids = []
+            for doc in docs:
+                data_dict = doc.to_dict()
+                if 'arquivo_base64' in data_dict:
+                    lista_ids.append(doc.id)
+                if len(lista_ids) >= 5:
+                    break
+            return lista_ids
         except Exception as e:
             print(f"[ERRO] Falha ao listar backups na nuvem: {e}")
             return []
         
     def verificar_atualizacao(self):
         try:
-            data = self.rt_db.child("configuracoes").get().val()
-            return data
+            return self.rt_db.child("configuracoes").get().val()
         except Exception as e:
-            print(f"[ERRO] Falha ao verificar atualização: {e}")
             return None
         
     @staticmethod
     def get_path_to_key():
-        if getattr(sys, 'frozen', False):
-            base_dir = sys._MEIPASS
-        else:
-            base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        
+        base_dir = sys._MEIPASS if getattr(sys, 'frozen', False) else os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         return os.path.join(base_dir, 'config', 'firebase-key.json')

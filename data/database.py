@@ -10,17 +10,28 @@ class BancoDeDados:
         self.modo_demonstracao = modo_demonstracao
         self.conexao = None
         
-        self.conectar()
-        self.criar_tabelas_padrao()
+        try:
+            self.conectar()
+            self.criar_tabelas_padrao()
+            self.inicializar_servicos_padrao()
+        except Exception as e:
+            print(f"[ERRO CRÍTICO] Falha ao inicializar banco de dados: {e}")
+            raise
 
     def conectar(self):
         if self.modo_demonstracao:
             print("[BANCO] Conectando ao Banco Volátil em memória RAM...")
             self.conexao = sqlite3.connect(":memory:")
+            self.conexao.execute("PRAGMA foreign_keys = ON;")
             self.criar_tabelas_padrao()
+            self.inicializar_servicos_padrao()
             self.injetar_dados_demonstracao()
         else:
             caminho_banco = BancoDeDados.obter_caminho_banco()
+            diretorio_db = os.path.dirname(caminho_banco)
+            
+            if diretorio_db and not os.path.exists(diretorio_db):
+                os.makedirs(diretorio_db, exist_ok=True)
             
             print(f"[BANCO] Conectando ao Banco de Dados Físico: {caminho_banco}")
             novo_banco = not os.path.exists(caminho_banco)
@@ -31,6 +42,7 @@ class BancoDeDados:
             if novo_banco:
                 print("[BANCO] Criando estrutura local pela primeira vez...")
                 self.criar_tabelas_padrao()
+                self.inicializar_servicos_padrao()
                 self.injetar_usuario_administrador_padrao()
         
         return self.conexao
@@ -65,7 +77,7 @@ class BancoDeDados:
                 nome TEXT NOT NULL,
                 especie TEXT,
                 raca TEXT,
-                FOREIGN KEY (tutor_id) REFERENCES tutores(id)
+                FOREIGN KEY (tutor_id) REFERENCES tutores(id) ON DELETE CASCADE
             )
         """)
 
@@ -77,9 +89,16 @@ class BancoDeDados:
                 data_atendimento TEXT,
                 hora_atendimento TEXT,
                 valor REAL,
-                status TEXT
+                status TEXT,
+                forma_pagamento TEXT,
+                FOREIGN KEY (pet_id) REFERENCES pets(id) ON DELETE SET NULL
             )
         """)
+
+        try:
+            cursor.execute("ALTER TABLE atendimentos ADD COLUMN forma_pagamento TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS gastos (
@@ -107,7 +126,53 @@ class BancoDeDados:
                 status TEXT NOT NULL
             )
         """)
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS servicos (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                nome TEXT UNIQUE NOT NULL,
+                preco REAL NOT NULL
+            )
+        """)
         
+        self.conexao.commit()
+
+    def inicializar_servicos_padrao(self):
+        """Garante que os 4 serviços base existam apenas na primeira inicialização"""
+        if not self.conexao: return
+        cursor = self.conexao.cursor()
+        
+        cursor.execute("CREATE TABLE IF NOT EXISTS meta_control (chave TEXT PRIMARY KEY)")
+        cursor.execute("SELECT 1 FROM meta_control WHERE chave = 'servicos_padrao_init'")
+        if cursor.fetchone():
+            return
+            
+        defaults = [
+            ("Banho Simples", 50.0),
+            ("Banho e Tosa", 80.0),
+            ("Consulta Veterinária", 120.0),
+            ("Tosa Higiênica", 40.0)
+        ]
+        cursor.executemany("INSERT OR IGNORE INTO servicos (nome, preco) VALUES (?, ?)", defaults)
+        cursor.execute("INSERT OR IGNORE INTO meta_control (chave) VALUES ('servicos_padrao_init')")
+        self.conexao.commit()
+
+    def listar_servicos(self):
+        cursor = self.conexao.cursor()
+        cursor.execute("SELECT id, nome, preco FROM servicos ORDER BY nome")
+        return cursor.fetchall()
+
+    def salvar_ou_atualizar_servico(self, nome, preco, servico_id=None):
+        cursor = self.conexao.cursor()
+        if servico_id:
+            cursor.execute("UPDATE servicos SET nome = ?, preco = ? WHERE id = ?", (nome, preco, servico_id))
+        else:
+            cursor.execute("INSERT OR REPLACE INTO servicos (nome, preco) VALUES (?, ?)", (nome, preco))
+        self.conexao.commit()
+
+    def excluir_servico(self, servico_id):
+        cursor = self.conexao.cursor()
+        cursor.execute("DELETE FROM servicos WHERE id = ?", (servico_id,))
         self.conexao.commit()
 
     def injetar_usuario_administrador_padrao(self):
@@ -153,9 +218,9 @@ class BancoDeDados:
             INSERT INTO atendimentos (pet_id, servico, data_atendimento, hora_atendimento, valor, status)
             VALUES (?, ?, ?, ?, ?, ?)
         """, [
-            (pet_id, 'Banho & Tosa Completa', '2026-05-28', '14:00', 90.00, 'Agendado'),
+            (pet_id, 'Banho e Tosa', '2026-05-28', '14:00', 90.00, 'Agendado'),
             (pet_id, 'Consulta Veterinária', '2026-05-28', '15:30', 150.00, 'Agendado'),
-            (pet_id, 'Banho & Tosa Completa', '2026-12-31', '14:00', 90.00, 'Agendado')
+            (pet_id, 'Banho e Tosa', '2026-12-31', '14:00', 90.00, 'Agendado')
         ])
         
         cursor.execute("INSERT INTO gastos (descricao, valor, data_gasto) VALUES ('Conta de Energia Elétrica', 320.00, '2026-05-28')")
@@ -173,31 +238,49 @@ class BancoDeDados:
             return 0
     
     def buscar_atendimentos_futuros(self):
-        """Busca atendimentos que ainda não ocorreram."""
         from datetime import datetime
         hoje = datetime.now().strftime("%Y-%m-%d")
-        
         cursor = self.conexao.cursor()
+        
+        cursor.execute("SELECT COUNT(*) FROM atendimentos")
+        print(f"[DEBUG] Total na tabela atendimentos: {cursor.fetchone()[0]}")
+        
         query = """
-            SELECT a.id, t.nome, a.servico, a.data_atendimento, a.hora_atendimento, a.valor
+            SELECT a.id, COALESCE(t.nome, 'Não vinculado'), COALESCE(p.nome, 'Não vinculado'), 
+                a.servico, a.data_atendimento, a.hora_atendimento, a.valor, COALESCE(a.forma_pagamento, '')
             FROM atendimentos a
-            JOIN pets p ON a.pet_id = p.id
-            JOIN tutores t ON p.tutor_id = t.id
+            LEFT JOIN pets p ON a.pet_id = p.id
+            LEFT JOIN tutores t ON p.tutor_id = t.id
             WHERE a.data_atendimento >= ? 
             AND (a.status != 'Concluído' OR a.status IS NULL OR a.status = '')
             ORDER BY a.data_atendimento, a.hora_atendimento
         """
         cursor.execute(query, (hoje,))
         dados = cursor.fetchall()
-        print(f"[DEBUG] Atendimentos futuros encontrados: {len(dados)}")
+        print(f"[DEBUG] Atendimentos futuros retornados: {len(dados)}")
         return dados
 
+    def adicionar_atendimento(self, pet_id, servico, data_atendimento, hora_atendimento, valor, forma_pagamento=""):
+        """Insere um novo atendimento/serviço agendado."""
+        try:
+            cursor = self.conexao.cursor()
+            cursor.execute("""
+                INSERT INTO atendimentos (pet_id, servico, data_atendimento, hora_atendimento, valor, status, forma_pagamento)
+                VALUES (?, ?, ?, ?, ?, 'Agendado', ?)
+            """, (pet_id, servico, data_atendimento, hora_atendimento, valor, forma_pagamento))
+            self.conexao.commit()
+            return True, cursor.lastrowid
+        except Exception as e:
+            self.conexao.rollback()
+            return False, str(e)
+
+    @staticmethod
     def obter_caminho_banco():
         if getattr(sys, 'frozen', False):
             base_dir = os.path.dirname(sys.executable)
         else:
             base_dir = os.path.dirname(os.path.abspath(__file__))
-    
+        
         return os.path.join(base_dir, "petshop.db")
     
     def fechar_conexao(self):

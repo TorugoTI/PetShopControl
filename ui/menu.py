@@ -11,6 +11,7 @@ from ui.components import (
     COR_BEGE_FUNDO, COR_TEXTO_ESCURO, COR_INPUT_BORDAS
 )
 from ui.registro import JanelaCadastro
+from ui.recuperar_senha import JanelaRecuperacao
 
 CAMINHO_ASSETS = os.path.join(os.path.dirname(__file__), "assets")
 
@@ -130,10 +131,8 @@ class TelaMenuInicial(QWidget):
         tela_cad.exec()
 
     def disparar_recuperacao_senha(self):
-        """Dispara a rotina de recuperação com base no input_email digitado"""
-        email = self.input_email.text().strip()
-        if not email:
-            QMessageBox.warning(self, "Aviso", "Por favor, digite o seu e-mail no campo de login para receber o link de recuperação.")
-            return 
-         
-        QMessageBox.information(self, "Recuperação de Conta", f"Um link para redefinição segura de senha foi enviado para o e-mail: {email}")
+        """Abre a janela interativa para redefinição de senha com código"""
+        email_atual = self.input_email.text().strip()
+        
+        tela_rec = JanelaRecuperacao(email_inicial=email_atual, parent=self)
+        tela_rec.exec()

@@ -6,6 +6,11 @@ import time
 import threading
 from dotenv import load_dotenv
 from PyQt6.QtCore import QSettings
+from PyQt6.QtWidgets import QApplication, QMessageBox
+from data.database import BancoDeDados
+from ui.menu import TelaMenuInicial
+from ui.dashboard import TelaDashboard
+from ui.registro import JanelaCadastro
 
 load_dotenv()
 
@@ -19,17 +24,9 @@ config_firebase = {
     "appId": os.getenv("FIREBASE_APP_ID")
 }
 
-chave_gemini = os.getenv("GEMINI_API_KEY")
-agenda_id = os.getenv("GOOGLE_CALENDAR_ID")
 firebase = pyrebase.initialize_app(config_firebase)
 auth_firebase = firebase.auth()
 db = firebase.database()
-
-from PyQt6.QtWidgets import QApplication, QMessageBox
-from data.database import BancoDeDados
-from ui.menu import TelaMenuInicial
-from ui.dashboard import TelaDashboard
-from ui.registro import JanelaCadastro
 
 class ControladorSistema:
     def __init__(self):
@@ -39,25 +36,34 @@ class ControladorSistema:
         self.tela_login = None
         self.tela_dashboard = None
         
+        self._iniciar_agendador_background()
 
-    def rotina_de_backup():
+    def rotina_de_backup(self):
         print("Executando backup automático...")
 
-    schedule.every(7).days.do(rotina_de_backup)
-
-    def rodar_agendador():
+    def rodar_agendador(self):
         while True:
             schedule.run_pending()
             time.sleep(1)
 
-    threading.Thread(target=rodar_agendador, daemon=True).start()
+    def _iniciar_agendador_background(self):
+        schedule.every(7).days.do(self.rotina_de_backup)
+        threading.Thread(target=self.rodar_agendador, daemon=True).start()
+
+    def inicializar_banco_se_vazio(self, banco):
+        if not banco or not banco.conexao:
+            return
+        cursor = banco.conexao.cursor()
+        tabelas = ["atendimentos", "tutores", "pets", "produtos", "usuarios"]
+        for tabela in tabelas:
+            cursor.execute(f"CREATE TABLE IF NOT EXISTS {tabela} (id INTEGER PRIMARY KEY)")
+        banco.conexao.commit()
 
     def iniciar(self):
         """Abre a tela de login inicializando-a com as dependências necessárias"""
         self.tela_login = TelaMenuInicial(self.banco, self)
         
         self.tela_login.sinal_abrir_cadastro.connect(self.abrir_cadastro)
-        
         self.tela_login.sinal_modo_demonstracao.connect(self.ativar_modo_demonstracao)
         self.tela_login.sinal_autenticar.connect(self.processar_autenticacao)
         
@@ -68,34 +74,20 @@ class ControladorSistema:
             self.banco.fechar_conexao()
         sys.exit(codigo_saida)
 
-        def inicializar_banco_se_vazio(banco):
-            cursor = banco.conexao.cursor()
-            tabelas = ["atendimentos", "tutores", "pets", "produtos", "usuarios"]
-            for tabela in tabelas:
-                cursor.execute(f"CREATE TABLE IF NOT EXISTS {tabela} (id INTEGER PRIMARY KEY)")
-            banco.conexao.commit()
-
-        if self.banco:
-            inicializar_banco_se_vazio(self.banco)
-
     def ativar_modo_demonstracao(self):
         print("DEBUG: Iniciando modo demo...")
         try:
-            print("DEBUG: Tentando abrir banco demo...")
             print("[SISTEMA] Inicializando Modo Demonstração...")
             if self.banco:
                 self.banco.fechar_conexao()
             
             self.banco = BancoDeDados(modo_demonstracao=True)
-            
             self.abrir_dashboard("demo@petshop.com", "Visitante (Modo Demo)", self.versao_atual)
-            
-            print("DEBUG: Sucesso!")
         except Exception as e:
+            print(f"Erro detalhado: {e}")
             import traceback
             traceback.print_exc()
-            input("Pressione ENTER para fechar...")
-        
+            QMessageBox.critical(None, "Erro Crítico", f"Ocorreu um erro: {str(e)}")
 
     def abrir_dashboard(self, email, cargo, versao):
         print(f"Abrindo dashboard para {email} com cargo {cargo}")
@@ -109,7 +101,6 @@ class ControladorSistema:
 
     def processar_autenticacao(self, email, senha):
         """Valida as credenciais e define o nível de acesso do usuário"""
-
         try:
             print(f"[FIREBASE] Tentando autenticar: {email}")
             usuario_firebase = auth_firebase.sign_in_with_email_and_password(email.strip(), senha.strip())
@@ -123,15 +114,17 @@ class ControladorSistema:
             settings = QSettings("PetShopControl", "Login")
             settings.setValue("ultimo_email", email_limpo)
             
+            if self.banco:
+                self.banco.fechar_conexao()
             self.banco = BancoDeDados(modo_demonstracao=False)
+            self.inicializar_banco_se_vazio(self.banco)
 
-            self.abrir_dashboard(email, cargo_usuario, self.versao_atual)
+            self.abrir_dashboard(email_limpo, cargo_usuario, self.versao_atual)
             
         except Exception as erro_firebase:
             print(f"[DEBUG] Erro real: {type(erro_firebase).__name__}: {str(erro_firebase)}")
             import traceback
             traceback.print_exc()
-    
             QMessageBox.warning(self.tela_login, "Erro no Sistema", f"Detalhes: {str(erro_firebase)}")
 
     def realizar_logout(self):
@@ -162,9 +155,14 @@ class ControladorSistema:
             self.banco = BancoDeDados(modo_demonstracao=False)
             self.banco.conectar()
             
-        from ui.registro import JanelaCadastro
         janela = JanelaCadastro(self.banco, auth_firebase, db) 
         janela.exec()
+
+    @staticmethod
+    def get_path(filename):
+        if hasattr(sys, '_MEIPASS'):
+            return os.path.join(sys._MEIPASS, filename)
+        return os.path.join(os.path.abspath("."), filename)
 
 if __name__ == "__main__":
     sistema = ControladorSistema()

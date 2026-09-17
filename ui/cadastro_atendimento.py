@@ -1,6 +1,7 @@
 from PyQt6.QtWidgets import QWidget, QFormLayout, QLabel, QComboBox, QTimeEdit, QMessageBox
 from PyQt6.QtCore import QTime
 from ui.components import BotaoPrincipal, SeletorData, CampoMoedaBancario
+from services.google_agenda import GerenciadorGoogleAgenda
 
 class CadastroAtendimentoWidget(QWidget):
     def __init__(self, banco, callback_atualizar):
@@ -36,6 +37,34 @@ class CadastroAtendimentoWidget(QWidget):
         btn_atendimento = BotaoPrincipal("Confirmar Agendamento")
         btn_atendimento.clicked.connect(self.salvar_atendimento)
         layout.addRow("", btn_atendimento)
+        self.cb_servico.clear()
+        self.carregar_servicos_combobox()
+        self.cb_servico.currentIndexChanged.connect(self.aplicar_preco_fixo_servico)
+
+    def carregar_servicos_combobox(self):
+        self.cb_servico.clear()
+        cursor = self.banco.conexao.cursor()
+        # Pega da tabela de serviços (garanta popular os 4 padrões no BD se vazio)
+        cursor.execute("SELECT nome, preco FROM servicos ORDER BY nome")
+        rows = cursor.fetchall()
+        if not rows:
+            defaults = [("Banho Simples", 50.0), ("Banho e Tosa", 80.0), ("Consulta Veterinária", 120.0), ("Tosa Higiênica", 40.0)]
+            cursor.executemany("INSERT OR IGNORE INTO servicos (nome, preco) VALUES (?, ?)", defaults)
+            self.banco.conexao.commit()
+            cursor.execute("SELECT nome, preco FROM servicos ORDER BY nome")
+            rows = cursor.fetchall()
+        
+        self._precos_servicos = {}
+        for nome, preco in rows:
+            self.cb_servico.addItem(nome)
+            self._precos_servicos[nome] = preco
+        self.aplicar_preco_fixo_servico()
+
+    def aplicar_preco_fixo_servico(self):
+        servico = self.cb_servico.currentText()
+        preco = getattr(self, '_precos_servicos', {}).get(servico, 0.0)
+        # preenche o campo de preço
+        self.txt_valor.setText(f"{preco:.2f}".replace(".", ","))
 
     def atualizar_combobox_pets(self):
         self.cb_pets.clear()
@@ -76,3 +105,7 @@ class CadastroAtendimentoWidget(QWidget):
                 
         except Exception as e:
             QMessageBox.critical(self, "Erro SQL", f"Falha ao agendar: {str(e)}")
+
+        agenda = GerenciadorGoogleAgenda()
+        msg = agenda.sincronizar_novo_agendamento(pet_id, servico, data_texto, hora_texto)
+        print(msg)

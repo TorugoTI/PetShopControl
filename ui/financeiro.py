@@ -1,5 +1,8 @@
-from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, QTableWidgetItem, QHeaderView, QTabWidget
-from PyQt6.QtGui import QFont
+from PyQt6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QTableWidget, 
+    QTableWidgetItem, QHeaderView, QTabWidget, QMessageBox, QMenu, QPushButton
+)
+from PyQt6.QtGui import QFont, QAction
 from PyQt6.QtCore import Qt
 from ui.components import COR_TEXTO_ESCURO
 
@@ -42,13 +45,27 @@ class TelaFinanceiro(QWidget):
         layout_entradas = QVBoxLayout(self.tab_entradas)
         self.tabela_entradas = QTableWidget()
         self.configurar_tabela(self.tabela_entradas, ["ID", "Cliente/Pet", "Serviço Prestado", "Data", "Valor (R$)"])
+        self.tabela_entradas.customContextMenuRequested.connect(
+            lambda pos: self.abrir_menu_contexto(pos, self.tabela_entradas, "atendimentos", "Atendimento/Receita")
+        )
         layout_entradas.addWidget(self.tabela_entradas)
+        btn_exc_ent = QPushButton("🗑️ Excluir Entrada Selecionada")
+        btn_exc_ent.setStyleSheet("background-color: #BA3C2A; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        btn_exc_ent.clicked.connect(lambda: self.excluir_selecionado_tabela(self.tabela_entradas, "atendimentos"))
+        layout_entradas.addWidget(btn_exc_ent)
 
         self.tab_saidas = QWidget()
         layout_saidas = QVBoxLayout(self.tab_saidas)
         self.tabela_saidas = QTableWidget()
         self.configurar_tabela(self.tabela_saidas, ["ID", "Descrição do Gasto", "Data de Pagamento", "Valor Pago (R$)"])
+        self.tabela_saidas.customContextMenuRequested.connect(
+            lambda pos: self.abrir_menu_contexto(pos, self.tabela_saidas, "gastos", "Despesa/Gasto")
+        )
         layout_saidas.addWidget(self.tabela_saidas)
+        btn_exc_sai = QPushButton("🗑️ Excluir Saída Selecionada")
+        btn_exc_sai.setStyleSheet("background-color: #BA3C2A; color: white; font-weight: bold; padding: 6px; border-radius: 4px;")
+        btn_exc_sai.clicked.connect(lambda: self.excluir_selecionado_tabela(self.tabela_saidas, "gastos"))
+        layout_saidas.addWidget(btn_exc_sai)
 
         self.abas.addTab(self.tab_entradas, "📈 Entradas (Serviços)")
         self.abas.addTab(self.tab_saidas, "📉 Saídas (Despesas / Estoque)")
@@ -56,8 +73,15 @@ class TelaFinanceiro(QWidget):
 
         self.atualizar_dados_financeiros()
 
+    def excluir_selecionado_tabela(self, tabela, tabela_sql):
+        row = tabela.currentRow()
+        if row < 0:
+            QMessageBox.warning(self, "Aviso", "Selecione uma linha na tabela.")
+            return
+        id_item = tabela.item(row, 0).text()
+        self.excluir_registro(id_item, tabela_sql)
+
     def criar_card(self, titulo, valor_inicial, cor_fundo):
-        """Helper para criar os cards coloridos de indicadores com texto escuro para melhor leitura"""
         card = QWidget()
         card.setObjectName("Card")
         card.setStyleSheet(f"""
@@ -86,19 +110,55 @@ class TelaFinanceiro(QWidget):
         return card
 
     def configurar_tabela(self, tabela, colunas):
-        """Ajusta o design padrão das tabelas"""
         tabela.setColumnCount(len(colunas))
         tabela.setHorizontalHeaderLabels(colunas)
         tabela.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         tabela.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         tabela.verticalHeader().setVisible(False)
+        tabela.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         
         header = tabela.horizontalHeader()
         for i in range(len(colunas)):
             header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
 
+    def abrir_menu_contexto(self, pos, tabela, nome_tabela_sql, rotulo):
+        item = tabela.itemAt(pos)
+        if not item:
+            return
+
+        row = item.row()
+        id_item = tabela.item(row, 0).text()
+
+        menu = QMenu(self)
+        acao_excluir = QAction(f"🗑️ Excluir {rotulo} (ID {id_item})", self)
+        acao_excluir.triggered.connect(lambda: self.excluir_registro(id_item, nome_tabela_sql))
+        menu.addAction(acao_excluir)
+        
+        menu.exec(tabela.viewport().mapToGlobal(pos))
+
+    def excluir_registro(self, registro_id, nome_tabela_sql):
+        if not self.banco or not self.banco.conexao:
+            return
+
+        confirmar = QMessageBox.question(
+            self, 
+            "Confirmar Exclusão", 
+            f"Tem certeza que deseja excluir o registro ID {registro_id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+
+        if confirmar == QMessageBox.StandardButton.Yes:
+            try:
+                cursor = self.banco.conexao.cursor()
+                cursor.execute(f"DELETE FROM {nome_tabela_sql} WHERE id = ?", (registro_id,))
+                self.banco.conexao.commit()
+                QMessageBox.information(self, "Sucesso", "Registro excluído com sucesso!")
+                self.atualizar_dados_financeiros()
+            except Exception as e:
+                QMessageBox.critical(self, "Erro", f"Falha ao excluir registro: {e}")
+
     def atualizar_dados_financeiros(self):
-        """Busca as informações em tempo real no banco e atualiza os cards e tabelas"""
         if not self.banco or not self.banco.conexao:
             return
 
@@ -160,6 +220,5 @@ class TelaFinanceiro(QWidget):
             print(f"Erro ao carregar dados financeiros: {e}")
 
     def showEvent(self, event):
-        """Atualiza a tela automaticamente sempre que o usuário clicar na aba Financeiro"""
         super().showEvent(event)
         self.atualizar_dados_financeiros()

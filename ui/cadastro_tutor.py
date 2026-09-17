@@ -2,9 +2,10 @@ from PyQt6.QtWidgets import QWidget, QFormLayout, QLabel, QMessageBox
 from ui.components import CampoTexto, BotaoPrincipal
 
 class CadastroTutorWidget(QWidget):
-    def __init__(self, banco):
+    def __init__(self, banco, callback_atualizar=None):
         super().__init__()
         self.banco = banco
+        self.callback_atualizar = callback_atualizar
         self.init_ui()
 
     def init_ui(self):
@@ -33,35 +34,38 @@ class CadastroTutorWidget(QWidget):
 
     def salvar_tutor(self):
         nome = self.txt_tutor_nome.text().strip()
-        cpf_limpo = self.txt_cpf.text().replace(".", "").replace("-", "").strip()
-        cpf_formatado = self.txt_cpf.text()
-        
-        tel_limpo = self.txt_telefone.text().replace("(", "").replace(")", "").replace("-", "").replace(" ", "").strip()
-        tel_formatado = self.txt_telefone.text()
-        
+        cpf_limpo = self.txt_cpf.text().replace(".", "").replace("-", "").replace("_", "").strip()
+        tel_limpo = self.txt_telefone.text().replace("(", "").replace(")", "").replace("-", "").replace(" ", "").replace("_", "").strip()
         email = self.txt_email.text().strip()
 
-        if not nome or len(tel_limpo) < 11:
-            QMessageBox.warning(self, "Campos Obrigatórios", "Por favor, insira o Nome e o Telefone com DDD completo.")
+        if not nome or len(tel_limpo) < 10:
+            QMessageBox.warning(self, "Campos Obrigatórios", "Nome e Telefone são obrigatórios.")
             return
 
-        if len(cpf_limpo) > 0 and len(cpf_limpo) < 11:
-            QMessageBox.warning(self, "CPF Incompleto", "Por favor, digite todos os 11 números do CPF.")
+        if cpf_limpo and len(cpf_limpo) != 11:
+            QMessageBox.warning(self, "CPF Incompleto", "O CPF deve ter 11 dígitos.")
             return
 
         try:
             cursor = self.banco.conexao.cursor()
+            valor_cpf = self.txt_cpf.text() if len(cpf_limpo) == 11 else None
+            
             cursor.execute("""
                 INSERT INTO tutores (nome, cpf, telefone, email)
                 VALUES (?, ?, ?, ?)
-            """, (nome, cpf_formatado if len(cpf_limpo) == 11 else "", tel_formatado, email))
+            """, (nome, valor_cpf, self.txt_telefone.text(), email))
+            
             self.banco.conexao.commit()
             
-            QMessageBox.information(self, "Sucesso", f"O tutor '{nome}' foi cadastrado com sucesso!")
+            QMessageBox.information(self, "Sucesso", f"Tutor '{nome}' cadastrado!")
             
             self.txt_tutor_nome.clear()
             self.txt_cpf.clear()  
             self.txt_telefone.clear()
             self.txt_email.clear()
+            
+            if self.callback_atualizar:
+                self.callback_atualizar()
+            
         except Exception as e:
-            QMessageBox.critical(self, "Erro SQL", f"Falha ao salvar tutor: {str(e)}")
+            QMessageBox.critical(self, "Erro SQL", f"Falha ao salvar: {str(e)}")

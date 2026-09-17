@@ -1,21 +1,24 @@
-from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QFrame, QFormLayout, QLabel, QPushButton, QMessageBox, QLineEdit, QInputDialog, QFileDialog, QListWidget
+from PyQt6.QtWidgets import QDialog, QWidget, QVBoxLayout, QLabel, QFrame, QFormLayout, QPushButton, QMessageBox, QLineEdit, QInputDialog, QFileDialog, QListWidget
 from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt
 from ui.components import BotaoPrincipal, COR_TEXTO_ESCURO
 from data.firebase_sync import SincronizadorFirebase
+from datetime import datetime
 import shutil
 import os
 import uuid
 
 class TelaPerfil(QWidget):
-    def __init__(self, sync_instance, email_logado, banco, cargo):
+    def __init__(self, sync_instance, email, banco, cargo):
         super().__init__()
         self.sync = sync_instance
         self.auth = self.sync.auth
         self.cargo = cargo
         self.banco = banco
-        self.email = email_logado
+        self.email = email
         self.firebase = SincronizadorFirebase()
+        self.is_admin = (self.email == "victor.ti.pereira@gmail.com")
+        
         self.init_ui()
 
     def init_ui(self):
@@ -31,16 +34,16 @@ class TelaPerfil(QWidget):
         form = QFormLayout(card)
 
         is_demo = self.email == "demo@petshop.com"
-        nome_exibicao = "Operador Padrão (Demonstração)" if is_demo else "Administrador"
-        nivel_acesso = "Operador (Restrito)" if is_demo else "Administrador Geral"
+        nome_exibicao = "Operador Padrão (Demonstração)" if is_demo else ("Administrador Master" if self.is_admin else "Operador")
+        nivel_acesso = "Operador (Restrito)" if is_demo else ("Administrador Geral" if self.is_admin else "Operador")
 
         form.addRow(QLabel("<b>E-mail:</b>"), QLabel(self.email))
         form.addRow(QLabel("<b>Nome:</b>"), QLabel(nome_exibicao))
         form.addRow(QLabel("<b>Nível de Acesso:</b>"), QLabel(nivel_acesso))
         layout.addWidget(card)
 
-        btn_codigo = BotaoPrincipal("🔑 Gerar Código de Acesso")
-        btn_codigo.clicked.connect(self.gerar_codigo)
+        self.btn_codigo = BotaoPrincipal("🔑 Gerar Código de Acesso")
+        self.btn_codigo.clicked.connect(self.gerar_codigo)
         
         btn_senha = BotaoPrincipal("🔒 Alterar Senha")
         btn_senha.clicked.connect(self.abrir_troca_senha)
@@ -59,9 +62,11 @@ class TelaPerfil(QWidget):
         btn_restaurar.setStyleSheet("background-color: #BA3C2A; color: white;")
         btn_restaurar.clicked.connect(self.restaurar_backup_banco)
         
-        
         layout_acoes = QVBoxLayout()
-        layout_acoes.addWidget(btn_codigo)
+        
+        if self.is_admin:
+            layout_acoes.addWidget(self.btn_codigo)
+            
         layout_acoes.addWidget(btn_senha)
         layout_acoes.addWidget(btn_backup_local)
         layout_acoes.addWidget(btn_backup_nuvem)
@@ -70,18 +75,25 @@ class TelaPerfil(QWidget):
         
         layout.addLayout(layout_acoes)
 
+        self.lbl_titulo_codigos = QLabel("<b>Códigos Ativos/Utilizados na Nuvem:</b>")
         self.lista_codigos = QListWidget()
-        layout.addWidget(QLabel("<b>Códigos Ativos na Nuvem:</b>"))
+        
+        layout.addWidget(self.lbl_titulo_codigos)
         layout.addWidget(self.lista_codigos)
-    
-        self.carregar_codigos()
+        
+        if self.is_admin:
+            self.carregar_codigos()
+        else:
+            self.lbl_titulo_codigos.setVisible(False)
+            self.lista_codigos.setVisible(False)
             
         if is_demo:
             lbl_aviso = QLabel("⚠️ Modo demonstração: Ações administrativas bloqueadas.")
             lbl_aviso.setStyleSheet("color: #BA3C2A; font-style: italic;")
             layout.addWidget(lbl_aviso)
-            btn_codigo.setEnabled(False)
             btn_backup_nuvem.setEnabled(False)
+            if self.is_admin:
+                self.btn_codigo.setEnabled(False)
             
         layout.addStretch()
 
@@ -96,20 +108,6 @@ class TelaPerfil(QWidget):
         self.txt_confirmar_nova = QLineEdit()
         self.txt_confirmar_nova.setPlaceholderText("Confirme a nova senha")
         self.txt_confirmar_nova.setEchoMode(QLineEdit.EchoMode.Password)
-
-    def gerar_codigo(self):
-        novo_codigo = str(uuid.uuid4())[:8].upper()
-        try:
-            cursor = self.banco.conexao.cursor()
-            cursor.execute("INSERT INTO codigos_convite (codigo, status) VALUES (?, 'Ativo')", (novo_codigo,))
-            self.banco.conexao.commit()
-            
-            self.firebase.salvar_codigo_convite(novo_codigo)
-            
-            self.carregar_codigos_admin()
-            QMessageBox.information(self, "Sucesso", f"Código gerado: {novo_codigo}")
-        except Exception as e:
-            QMessageBox.critical(self, "Erro", f"Falha ao gerar código: {e}")
 
     def abrir_troca_senha(self):
         dialog = DialogTrocaSenha(self)
@@ -142,12 +140,9 @@ class TelaPerfil(QWidget):
             
         try:
             user = self.auth.sign_in_with_email_and_password(self.email, antiga)
-            
             self.auth.update_password(user['idToken'], nova)
-            
             QMessageBox.information(self, "Sucesso", "Senha alterada com sucesso no Firebase!")
             self.accept()
-            
         except Exception as e:
             QMessageBox.critical(self, "Erro", "Falha ao alterar senha. Verifique se a senha atual está correta.")
             print(f"[DEBUG] Erro Firebase: {e}")
@@ -156,48 +151,49 @@ class TelaPerfil(QWidget):
         caminho_backup, _ = QFileDialog.getOpenFileName(self, "Selecione o arquivo de Backup", "", "Arquivos DB (*.db)")
         if caminho_backup:
             caminho_banco_atual = os.path.join(os.path.dirname(os.path.dirname(__file__)), "petshop.db")
-            
             confirm = QMessageBox.question(self, "Restaurar", "Isso sobrescreverá seu banco atual. Continuar?")
             if confirm == QMessageBox.StandardButton.Yes:
                 shutil.copy(caminho_backup, caminho_banco_atual)
                 QMessageBox.information(self, "Sucesso", "Backup restaurado! O sistema será reiniciado.")
-    
-    def fazer_backup_local(self):
-        caminho_destino = QFileDialog.getExistingDirectory(self, "Escolher pasta para Backup")
-        if caminho_destino:
-            try:
-                caminho_banco = os.path.join(os.path.dirname(os.path.dirname(__file__)), "petshop.db")
-                shutil.copy(caminho_banco, os.path.join(caminho_destino, "backup_petshop.db"))
-                QMessageBox.information(self, "Backup", "Backup local realizado com sucesso!")
-            except Exception as e:
-                QMessageBox.critical(self, "Erro", f"Falha ao realizar backup: {e}")
 
     def restaurar_backup_nuvem(self):
         backups_disponiveis = self.firebase.listar_backups_nuvem()
-        
         if not backups_disponiveis:
-            QMessageBox.warning(self, "Aviso", "Nenhum backup encontrado na nuvem.")
+            QMessageBox.warning(self, "Aviso", "Nenhum backup com dados encontrado na nuvem.")
             return
 
-        item, ok = QInputDialog.getItem(self, "Restaurar Nuvem", 
-                                        "Selecione o backup:", backups_disponiveis, 0, False)
-        
+        item, ok = QInputDialog.getItem(self, "Restaurar Nuvem", "Selecione o backup:", backups_disponiveis, 0, False)
         if ok and item:
-            confirm = QMessageBox.question(self, "Confirmação", 
-                                           f"Restaurar o backup {item}? Isso sobrescreverá seus dados atuais.")
+            bytes_db = self.firebase.carregar_dados_backup_nuvem(item)
+            if not bytes_db:
+                QMessageBox.critical(self, "Erro", "Não foi possível carregar os dados do backup da nuvem.")
+                return
+            import tempfile
+            with tempfile.NamedTemporaryFile(delete=False, suffix=".db") as tmp:
+                tmp.write(bytes_db)
+                tmp_path = tmp.name
+
+            confirm = QMessageBox.question(
+                self, 
+                "Confirmar Gravação Local", 
+                f"Dados do backup '{item}' carregados no preview do dashboard.\n\nDeseja salvar definitivo no banco local (.db)?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+            )
             
             if confirm == QMessageBox.StandardButton.Yes:
-                QMessageBox.information(self, "Progresso", "Iniciando download do backup...")
-                self.firebase.baixar_e_aplicar_backup(item)
+                sucesso = self.firebase.restaurar_backup_local(tmp_path)
+                if sucesso:
+                    QMessageBox.information(self, "Sucesso", "Backup gravado no banco local! Reinicie o sistema.")
+                else:
+                    QMessageBox.critical(self, "Erro", "Falha ao gravar o backup no banco local.")
+            
+            if os.path.exists(tmp_path):
+                os.unlink(tmp_path)
 
     def restaurar_backup_banco(self):
         caminho_backup, _ = QFileDialog.getOpenFileName(self, "Selecionar Backup", "", "Arquivos de Banco (*.db)")
-        
         if caminho_backup:
-            confirm = QMessageBox.question(self, "Confirmação", 
-                                           "ATENÇÃO: Isso irá substituir seus dados atuais pelos dados do backup. Continuar?",
-                                           QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            
+            confirm = QMessageBox.question(self, "Confirmação", "ATENÇÃO: Isso irá substituir seus dados atuais pelos dados do backup. Continuar?", QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if confirm == QMessageBox.StandardButton.Yes:
                 sucesso = self.firebase.restaurar_backup_local(caminho_backup)
                 if sucesso:
@@ -206,27 +202,69 @@ class TelaPerfil(QWidget):
                     QMessageBox.critical(self, "Erro", "Falha ao restaurar o arquivo.")
     
     def fazer_backup_nuvem(self):
-        sucesso = self.firebase.enviar_backup_semanal_com_retencao(self.email)
+        sucesso = self.firebase.enviar_backup_oficial_nuvem(self.email)
         if sucesso:
-            QMessageBox.information(self, "Nuvem", "Backup enviado ao Firebase com sucesso!")
+            QMessageBox.information(self, "Nuvem", "Backup completo do banco (.db) enviado para o Firebase com sucesso!")
         else:
-            QMessageBox.critical(self, "Nuvem", "Falha ao enviar backup.")
+            QMessageBox.critical(self, "Nuvem", "Falha ao enviar backup para o Firebase. Verifique o console.")
+
+    def fazer_backup_local(self):
+        destino = self.firebase.fazer_backup_local_gerenciado()
+        if destino:
+            QMessageBox.information(self, "Backup Local", f"Backup salvo em:\n{destino}")
+        else:
+            caminho_destino = QFileDialog.getExistingDirectory(self, "Escolher pasta para Backup")
+            if caminho_destino:
+                try:
+                    shutil.copy(self.firebase.caminho_db_local, os.path.join(caminho_destino, f"backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.db"))
+                    QMessageBox.information(self, "Backup", "Backup local realizado com sucesso!")
+                except Exception as e:
+                    QMessageBox.critical(self, "Erro", f"Falha ao realizar backup: {e}")
     
     def carregar_codigos(self):
-        if self.cargo != "Administrador Master":
+        if not self.is_admin:
             return
-    
+        """Carrega e exibe todos os códigos (ativos e utilizados) com o respectivo e-mail associado na interface"""
         self.lista_codigos.clear() 
-    
-        codigos = self.firebase.listar_codigos_ativos()
-    
-        for item in codigos:
-            codigo = item.get('codigo', 'Sem código')
-            self.lista_codigos.addItem(codigo)
-            print(f"[DEBUG] Código carregado: {codigo}")
+        
+        try:
+            docs = self.firebase.db.collection('codigos_convite').stream()
+            tem_itens = False
+            for doc in docs:
+                tem_itens = True
+                dados = doc.to_dict()
+                codigo = dados.get('codigo', 'Desconhecido')
+                status = dados.get('status', 'Ativo')
+                email_associado = dados.get('email_associado')
+                
+                if status == 'Utilizado' and email_associado:
+                    texto_exibicao = f"🔑 {codigo} - Status: {status} (Conta: {email_associado})"
+                else:
+                    texto_exibicao = f"🔑 {codigo} - Status: {status}"
+                    
+                self.lista_codigos.addItem(texto_exibicao)
+                
+            if not tem_itens:
+                self.lista_codigos.addItem("Nenhum código encontrado.")
+        except Exception as e:
+            print(f"[DEBUG] Erro ao carregar códigos: {e}")
+            self.lista_codigos.addItem("Erro ao carregar códigos da nuvem.")
 
-    def carregar_codigos_admin(self):
-        codigos = self.sync.listar_codigos_ativos()
+    def gerar_codigo(self):
+        if not self.is_admin:
+            QMessageBox.critical(self, "Acesso Negado", "Apenas administradores podem gerar códigos.")
+            return
+        novo_codigo = str(uuid.uuid4())[:8].upper()
+        try:
+            cursor = self.banco.conexao.cursor()
+            cursor.execute("INSERT INTO codigos_convite (codigo, status) VALUES (?, 'Ativo')", (novo_codigo,))
+            self.banco.conexao.commit()
+            
+            self.firebase.salvar_codigo_convite(novo_codigo)
+            self.carregar_codigos()
+            QMessageBox.information(self, "Sucesso", f"Código gerado: {novo_codigo}")
+        except Exception as e:
+            QMessageBox.critical(self, "Erro", f"Falha ao gerar código: {e}")
 
 class DialogTrocaSenha(QDialog):
     def __init__(self, parent=None):
